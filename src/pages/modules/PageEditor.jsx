@@ -519,8 +519,6 @@ export default function PageEditor() {
   const [devMode,   setDevMode]   = useState("full");
   const [htmlEditorOpen, setHtmlEditorOpen] = useState(false);
 
-  // ── Per-device hero nastavení ──
-  // heroes = { full: {...}, tablet: {...}, mobile: {...}, mockup-mobile: {...}, ... }
   const [heroes, setHeroes] = useState({ full: DEFAULT_HERO });
 
   const [editorKey,         setEditorKey]         = useState(0);
@@ -545,15 +543,12 @@ export default function PageEditor() {
   const [intAC, setIntAC] = useState(false); const [acUrl, setAcUrl] = useState(""); const [acKey, setAcKey] = useState("");
   const [publishing, setPublishing] = useState(false);
 
-  // Aktuální hero pro aktuální zařízení (fallback na full)
   const currentHero = heroes[devMode] || heroes["full"] || DEFAULT_HERO;
 
-  // Aktualizuj hero pro aktuální zařízení
   function setCurrentHero(newHero) {
     setHeroes(h => ({ ...h, [devMode]: newHero }));
   }
 
-  // Při přepnutí zařízení — pokud pro něj ještě není hero, zdědí z full
   function switchDevice(key) {
     setDevMode(key);
     setHeroes(h => {
@@ -569,7 +564,6 @@ export default function PageEditor() {
         const data = { id: snap.id, ...snap.data() };
         setPage(data);
         setEditorInitialHtml(data.text || "");
-        // Načti heroes — buď nový formát nebo starý (zpětná kompatibilita)
         if (data.heroes) {
           setHeroes(data.heroes);
         } else if (data.hero) {
@@ -984,13 +978,22 @@ export default function PageEditor() {
         {/* ══ PRAVÝ NÁHLED ══ */}
         <div style={{ flex:1, overflowY:"auto", background: isMockup ? "#1a1a2e" : "#f0f0f5", display:"flex", flexDirection:"column", alignItems: isMockup ? "center" : devMode === "full" ? "stretch" : "center" }}>
 
-          {/* Toolbar */}
-          <div style={{ display:"flex", gap:"5px", padding:"8px 12px", background: isMockup ? "#16162a" : "#f0f0f5", justifyContent:"center", borderBottom:`1px solid ${isMockup ? "#2e2e4e" : "#e5e5f0"}`, flexWrap:"wrap", flexShrink:0, width:"100%" }}>
+          {/* ── OPRAVENÝ TOOLBAR ── */}
+          <div style={{ display:"flex", gap:"5px", padding:"8px 12px", background: isMockup ? "#16162a" : "#ffffff", justifyContent:"center", borderBottom:`1px solid ${isMockup ? "#2e2e4e" : "#e5e5f0"}`, flexWrap:"wrap", flexShrink:0, width:"100%" }}>
             {DEVICES.map(d => (
               <button key={d.key} onClick={() => switchDevice(d.key)}
-                style={{ padding:"5px 10px", fontSize:".78rem", border:`1px solid ${devMode===d.key ? "#7c3aed" : isMockup ? "rgba(255,255,255,.2)" : "var(--border)"}`, borderRadius:"7px", background: devMode===d.key ? "#7c3aed" : "transparent", color: devMode===d.key ? "#fff" : isMockup ? "rgba(255,255,255,.6)" : "var(--text)", cursor:"pointer", position:"relative" }}>
+                style={{
+                  padding:"5px 10px",
+                  fontSize:".78rem",
+                  border:`1px solid ${devMode===d.key ? "#7c3aed" : isMockup ? "rgba(255,255,255,.2)" : "#d1d5db"}`,
+                  borderRadius:"7px",
+                  background: devMode===d.key ? "#7c3aed" : isMockup ? "transparent" : "#f9fafb",
+                  color: devMode===d.key ? "#fff" : isMockup ? "rgba(255,255,255,.6)" : "#374151",
+                  cursor:"pointer",
+                  position:"relative",
+                  fontWeight: devMode===d.key ? 600 : 400,
+                }}>
                 {d.label}
-                {/* Tečka pokud má vlastní nastavení */}
                 {heroes[d.key] && d.key !== "full" && (
                   <span style={{ position:"absolute", top:"2px", right:"2px", width:"6px", height:"6px", background: devMode===d.key ? "#fff" : "#7c3aed", borderRadius:"50%" }} />
                 )}
