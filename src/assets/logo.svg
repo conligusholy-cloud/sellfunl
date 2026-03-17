@@ -1,0 +1,6 @@
+<svg width="120" height="100" viewBox="0 0 120 100" xmlns="http://www.w3.org/2000/svg">
+  <!-- Funnel -->
+  <polygon points="105,8 15,8 38,46 82,46" fill="#7c3aed" opacity="0.95"/>
+  <polygon points="80,52 40,52 54,78 66,78" fill="#7c3aed" opacity="0.7"/>
+  <polygon points="65,84 55,84 60,96" fill="#7c3aed" opacity="0.45"/>
+</svg>

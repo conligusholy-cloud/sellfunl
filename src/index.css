@@ -1,0 +1,221 @@
+html[data-theme="dark"] {
+  --bg:          #0f172a;
+  --bg-card:     #1e293b;
+  --text:        #f1f5f9;
+  --text-muted:  #94a3b8;
+  --primary:     #3b82f6;
+  --primary-hover: #2563eb;
+  --border:      #334155;
+  --input-bg:    #0f172a;
+  --shadow:      0 2px 8px rgba(0,0,0,0.4);
+}
+/* ===== CSS PROMĚNNÉ — light mode (výchozí) ===== */
+:root {
+  --bg:          #f4f6f9;
+  --bg-card:     #ffffff;
+  --text:        #1a1a2e;
+  --text-muted:  #6b7280;
+  --primary:     #2563eb;
+  --primary-hover: #1d4ed8;
+  --border:      #e5e7eb;
+  --input-bg:    #ffffff;
+  --shadow:      0 2px 8px rgba(0,0,0,0.08);
+  --radius:      10px;
+}
+
+/* ===== Dark mode ===== */
+[data-theme="dark"] {
+  --bg:          #0f172a;
+  --bg-card:     #1e293b;
+  --text:        #f1f5f9;
+  --text-muted:  #94a3b8;
+  --primary:     #3b82f6;
+  --primary-hover: #2563eb;
+  --border:      #334155;
+  --input-bg:    #0f172a;
+  --shadow:      0 2px 8px rgba(0,0,0,0.4);
+}
+
+/* ===== Reset ===== */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: 'Inter', 'Segoe UI', sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+  transition: background 0.3s, color 0.3s;
+}
+
+/* ===== Přihlašovací stránky ===== */
+.page-center {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+.page-center h2 {
+  font-size: 1.8rem;
+  font-weight: 700;
+  margin-bottom: 24px;
+  color: var(--text);
+}
+
+.page-center input {
+  width: 100%;
+  max-width: 360px;
+  padding: 12px 16px;
+  margin-bottom: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--input-bg);
+  color: var(--text);
+  font-size: 0.95rem;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.page-center input:focus {
+  border-color: var(--primary);
+}
+
+.page-center button {
+  width: 100%;
+  max-width: 360px;
+  padding: 12px;
+  background: var(--primary);
+  color: #fff;
+  border: none;
+  border-radius: var(--radius);
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s;
+  margin-bottom: 16px;
+}
+
+.page-center button:hover {
+  background: var(--primary-hover);
+}
+
+.page-center p {
+  color: var(--text-muted);
+  font-size: 0.9rem;
+  margin-top: 8px;
+}
+
+.page-center a {
+  color: var(--primary);
+  text-decoration: none;
+  font-weight: 500;
+}
+
+.page-center a:hover {
+  text-decoration: underline;
+}
+
+/* ===== Chybové a úspěšné zprávy ===== */
+.error {
+  color: #ef4444;
+  font-size: 0.9rem;
+  margin-bottom: 12px;
+  max-width: 360px;
+  text-align: center;
+}
+
+.success {
+  color: #22c55e;
+  font-size: 0.9rem;
+  margin-bottom: 12px;
+  max-width: 360px;
+  text-align: center;
+}
+
+/* ===== Dashboard layout ===== */
+.dashboard {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 32px 24px;
+}
+
+.dashboard-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 32px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.dashboard-header h1 {
+  font-size: 1.5rem;
+  font-weight: 700;
+}
+
+.dashboard-header .actions {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+/* ===== Tlačítka ===== */
+.btn {
+  padding: 8px 20px;
+  border-radius: var(--radius);
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  border: none;
+  transition: background 0.2s;
+}
+
+.btn-primary {
+  background: var(--primary);
+  color: #fff;
+}
+
+.btn-primary:hover { background: var(--primary-hover); }
+
+.btn-outline {
+  background: transparent;
+  color: var(--text);
+  border: 1px solid var(--border);
+}
+
+.btn-outline:hover { background: var(--border); }
+
+/* ===== Karty ===== */
+.card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 24px;
+  box-shadow: var(--shadow);
+}
+
+/* ===== Přepínač dark/light ===== */
+.theme-toggle {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  padding: 6px 14px;
+  cursor: pointer;
+  font-size: 0.85rem;
+  color: var(--text);
+  transition: all 0.2s;
+}
+
+.theme-toggle:hover { border-color: var(--primary); }
+
+/* ===== Loading ===== */
+.loading {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.1rem;
+  color: var(--text-muted);
+}
