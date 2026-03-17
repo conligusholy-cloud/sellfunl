@@ -211,7 +211,6 @@ ${animCss}${bgAnimCss}
     ${!isBottom && hero.showMedia ? mediaBox : ""}
   </div>
   ${isBottom && hero.showMedia ? `<div style="padding:0 52px 40px;width:100%">${mediaBox}</div>` : ""}
-
 </div>
 </body></html>`;
 }
@@ -278,7 +277,6 @@ export default function HeroEditor({ hero, onChange, userId }) {
     );
   }
 
-  // Pouze panel bez náhledu — náhled je v pravém panelu PageEditoru
   return (
     <div style={{ overflowY:"auto", background:"var(--bg-card)" }}>
 
@@ -309,7 +307,10 @@ export default function HeroEditor({ hero, onChange, userId }) {
         {hero.showMedia && (<>
           <div style={{ marginTop:"6px" }}>
             <input ref={mediaFileRef} type="file" accept="image/*,video/*" style={{ display:"none" }} onChange={handleMediaUpload}/>
-            <button onClick={()=>mediaFileRef.current?.click()} disabled={uploading}
+            <button
+              data-hero-field="mediaUpload"
+              onClick={()=>mediaFileRef.current?.click()}
+              disabled={uploading}
               style={{ width:"100%", padding:"7px", fontSize:"12px", border:"1px dashed var(--border)", borderRadius:"7px", background:"var(--bg)", color:"var(--text-muted)", cursor:"pointer" }}>
               {uploading ? `⏳ Nahrávám... ${uploadPct}%` : hero.mediaUrl ? "🔄 Změnit soubor" : "⬆ Nahrát obrázek / video"}
             </button>
@@ -349,23 +350,57 @@ export default function HeroEditor({ hero, onChange, userId }) {
       {/* Badge */}
       <div style={S.sec}>
         <Check id="sb" label="Badge / štítek" checked={hero.showBadge} onChange={v=>upd("showBadge",v)}/>
-        {hero.showBadge && <input value={hero.badgeText||""} onChange={e=>upd("badgeText",e.target.value)} style={{ ...S.input, marginTop:"5px" }} placeholder="Text badge"/>}
+        {hero.showBadge && (
+          <input
+            data-hero-field="badgeText"
+            value={hero.badgeText||""}
+            onChange={e=>upd("badgeText",e.target.value)}
+            style={{ ...S.input, marginTop:"5px" }}
+            placeholder="Text badge"
+          />
+        )}
       </div>
 
       {/* Nadpis */}
       <div style={S.sec}>
         <Check id="sh" label="Hlavní nadpis" checked={hero.showH1} onChange={v=>upd("showH1",v)}/>
         {hero.showH1 && (<>
-          <input value={hero.h1Line1||""} onChange={e=>upd("h1Line1",e.target.value)} style={{ ...S.input, marginTop:"5px" }} placeholder="Řádek 1"/>
-          <input value={hero.h1Accent||""} onChange={e=>upd("h1Accent",e.target.value)} style={{ ...S.input, marginTop:"4px" }} placeholder="Zvýrazněný řádek (barevný)"/>
-          <input value={hero.h1Line2||""} onChange={e=>upd("h1Line2",e.target.value)} style={{ ...S.input, marginTop:"4px" }} placeholder="Řádek 3"/>
+          <input
+            data-hero-field="h1Line1"
+            value={hero.h1Line1||""}
+            onChange={e=>upd("h1Line1",e.target.value)}
+            style={{ ...S.input, marginTop:"5px" }}
+            placeholder="Řádek 1"
+          />
+          <input
+            data-hero-field="h1Accent"
+            value={hero.h1Accent||""}
+            onChange={e=>upd("h1Accent",e.target.value)}
+            style={{ ...S.input, marginTop:"4px" }}
+            placeholder="Zvýrazněný řádek (barevný)"
+          />
+          <input
+            data-hero-field="h1Line2"
+            value={hero.h1Line2||""}
+            onChange={e=>upd("h1Line2",e.target.value)}
+            style={{ ...S.input, marginTop:"4px" }}
+            placeholder="Řádek 3"
+          />
         </>)}
       </div>
 
       {/* Podnadpis */}
       <div style={S.sec}>
         <Check id="ss" label="Podnadpis" checked={hero.showSub} onChange={v=>upd("showSub",v)}/>
-        {hero.showSub && <textarea value={hero.subText||""} onChange={e=>upd("subText",e.target.value)} style={{ ...S.input, marginTop:"5px", minHeight:"60px", resize:"vertical" }} placeholder="Popis / podnadpis"/>}
+        {hero.showSub && (
+          <textarea
+            data-hero-field="subText"
+            value={hero.subText||""}
+            onChange={e=>upd("subText",e.target.value)}
+            style={{ ...S.input, marginTop:"5px", minHeight:"60px", resize:"vertical" }}
+            placeholder="Popis / podnadpis"
+          />
+        )}
       </div>
 
       {/* Statistiky */}
@@ -384,7 +419,13 @@ export default function HeroEditor({ hero, onChange, userId }) {
         <span style={S.lbl}>🔘 Tlačítka</span>
         <Check id="b1" label="Primární tlačítko" checked={hero.btn1} onChange={v=>upd("btn1",v)}/>
         {hero.btn1 && (<>
-          <input value={hero.btn1Text||""} onChange={e=>upd("btn1Text",e.target.value)} style={{ ...S.input, marginBottom:"4px" }} placeholder="Text tlačítka"/>
+          <input
+            data-hero-field="btn1Text"
+            value={hero.btn1Text||""}
+            onChange={e=>upd("btn1Text",e.target.value)}
+            style={{ ...S.input, marginBottom:"4px" }}
+            placeholder="Text tlačítka"
+          />
           <input value={hero.btn1Link||""} onChange={e=>upd("btn1Link",e.target.value)} style={S.input} placeholder="https://... (odkaz)"/>
         </>)}
         <div style={{ marginTop:"6px" }}>

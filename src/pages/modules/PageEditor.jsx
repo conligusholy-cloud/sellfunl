@@ -520,6 +520,8 @@ export default function PageEditor() {
   const [htmlEditorOpen, setHtmlEditorOpen] = useState(false);
 
   const [heroes, setHeroes] = useState({ full: DEFAULT_HERO });
+  const heroOverlayRef = useRef(null);
+  const panelRef = useRef(null);
 
   const [editorKey,         setEditorKey]         = useState(0);
   const [editorInitialHtml, setEditorInitialHtml] = useState("");
@@ -702,7 +704,7 @@ export default function PageEditor() {
       <div style={{ display:"flex", height:"100vh", overflow:"hidden", fontFamily:"var(--font-sans,'Inter',sans-serif)" }}>
 
         {/* ══ LEVÝ PANEL ══ */}
-        <div style={{ width:"380px", minWidth:"360px", background:"var(--bg-card)", borderRight:"1px solid var(--border)", display:"flex", flexDirection:"column", overflow:"hidden" }}>
+        <div ref={panelRef} style={{ width:"380px", minWidth:"360px", background:"var(--bg-card)", borderRight:"1px solid var(--border)", display:"flex", flexDirection:"column", overflow:"hidden" }}>
 
           {/* Topbar */}
           <div style={{ padding:"10px 14px", borderBottom:"1px solid var(--border)", display:"flex", alignItems:"center", gap:"7px", flexShrink:0 }}>
@@ -1067,7 +1069,7 @@ export default function PageEditor() {
           {!isMockup && (
             <div style={{ width: previewWidth, margin: devMode === "full" ? "0" : "0 auto", background:"#fff", transition:"width .25s", flex: devMode === "full" ? 1 : "none" }}>
               {currentHero && (
-                <div style={{ overflow:"hidden" }}>
+                <div style={{ overflow:"hidden", position:"relative" }} ref={heroOverlayRef}>
                   <iframe
                     key={`${devMode}-${currentHero.height}`}
                     srcDoc={buildHeroHtml(currentHero)}
@@ -1082,6 +1084,52 @@ export default function PageEditor() {
                     }}
                     style={{ border:"none", width:"100%", minHeight: currentHero.height === "100vh" ? "100vh" : (currentHero.height || "500px"), display:"block", overflow:"hidden" }}
                   />
+
+                  {/* ── HERO CLICK OVERLAY ── */}
+                  <style>{`
+                    .hero-zone { position:absolute; cursor:pointer; border:2px solid transparent; border-radius:6px; transition:border-color .15s, background .15s; }
+                    .hero-zone:hover { border-color:#7c3aed88; background:rgba(124,58,237,.08); }
+                    .hero-zone:hover .hero-zone-tip { display:flex; }
+                    .hero-zone-tip { display:none; position:absolute; top:-26px; left:0; background:#7c3aed; color:#fff; font-size:10px; font-weight:700; padding:3px 8px; border-radius:4px; white-space:nowrap; z-index:10; align-items:center; gap:4px; pointer-events:none; }
+                  `}</style>
+
+                  {/* Badge */}
+                  {currentHero.showBadge && (
+                    <div className="hero-zone" style={{ top:"14%", left:"4%", width:"30%", height:"7%" }}
+                      onClick={() => { setActiveTab(0); setTimeout(() => { const el = panelRef.current?.querySelector('[data-hero-field="badgeText"]'); el?.focus(); el?.scrollIntoView({ behavior:"smooth", block:"center" }); }, 100); }}>
+                      <span className="hero-zone-tip">✏️ Badge text</span>
+                    </div>
+                  )}
+
+                  {/* H1 nadpis */}
+                  {currentHero.showH1 && (
+                    <div className="hero-zone" style={{ top:"22%", left:"3%", width:"55%", height:"28%" }}
+                      onClick={() => { setActiveTab(0); setTimeout(() => { const el = panelRef.current?.querySelector('[data-hero-field="h1Line1"]'); el?.focus(); el?.scrollIntoView({ behavior:"smooth", block:"center" }); }, 100); }}>
+                      <span className="hero-zone-tip">✏️ Hlavní nadpis</span>
+                    </div>
+                  )}
+
+                  {/* Subtext */}
+                  {currentHero.showSub && (
+                    <div className="hero-zone" style={{ top:"51%", left:"3%", width:"50%", height:"10%" }}
+                      onClick={() => { setActiveTab(0); setTimeout(() => { const el = panelRef.current?.querySelector('[data-hero-field="subText"]'); el?.focus(); el?.scrollIntoView({ behavior:"smooth", block:"center" }); }, 100); }}>
+                      <span className="hero-zone-tip">✏️ Podnadpis</span>
+                    </div>
+                  )}
+
+                  {/* Tlačítka */}
+                  <div className="hero-zone" style={{ top:"68%", left:"3%", width:"45%", height:"14%" }}
+                    onClick={() => { setActiveTab(0); setTimeout(() => { const el = panelRef.current?.querySelector('[data-hero-field="btn1Text"]'); el?.focus(); el?.scrollIntoView({ behavior:"smooth", block:"center" }); }, 100); }}>
+                    <span className="hero-zone-tip">✏️ Tlačítka</span>
+                  </div>
+
+                  {/* Media box */}
+                  {currentHero.showMedia && (
+                    <div className="hero-zone" style={{ top:"8%", right:"2%", width:"38%", height:"80%" }}
+                      onClick={() => { setActiveTab(0); setTimeout(() => { const el = panelRef.current?.querySelector('[data-hero-field="mediaUpload"]'); el?.scrollIntoView({ behavior:"smooth", block:"center" }); }, 100); }}>
+                      <span className="hero-zone-tip">🖼 Media / obrázek</span>
+                    </div>
+                  )}
                 </div>
               )}
 
