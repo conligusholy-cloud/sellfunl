@@ -1084,19 +1084,70 @@ export default function PageEditor() {
                   />
                 </div>
               )}
-              <div style={{ padding:"32px 40px 24px", borderBottom:"1px solid #f0f0f0" }}>
+
+              {/* ── INLINE EDITABLE SEKCE ── */}
+              <style>{`
+                .inline-field { position:relative; }
+                .inline-field:hover::after { content:'✏️'; position:absolute; top:4px; right:6px; font-size:12px; opacity:.5; pointer-events:none; }
+                .inline-editable:focus { outline:2px solid #7c3aed44; border-radius:4px; background:#faf8ff !important; }
+                .inline-editable:empty:before { content:attr(data-placeholder); color:#9ca3af; font-style:italic; }
+                .inline-editable { border-radius:4px; transition:background .15s; cursor:text; }
+                .inline-editable:hover { background:#f5f3ff55; }
+                .inline-section { position:relative; }
+                .inline-section:hover { outline:1px dashed #c4b5fd44; }
+                .inline-section-label { display:none; position:absolute; top:4px; left:4px; font-size:10px; font-weight:700; color:#7c3aed; background:#ede9fe; padding:2px 7px; border-radius:4px; letter-spacing:.4px; text-transform:uppercase; pointer-events:none; z-index:10; }
+                .inline-section:hover .inline-section-label { display:block; }
+              `}</style>
+
+              {/* Headline + Subline sekce */}
+              <div className="inline-section" style={{ padding:"32px 40px 24px", borderBottom:"1px solid #f0f0f0" }}>
+                <span className="inline-section-label">Hero text</span>
                 {page.image && <img src={page.image} alt="" style={{ width:"100%", maxHeight:"300px", objectFit:"cover", borderRadius:"10px", marginBottom:"20px" }} onError={e => e.target.style.display="none"} />}
-                {page.headline && <h1 style={{ fontSize:"1.9rem", fontWeight:800, color:"#1e1b4b", marginBottom:"10px", lineHeight:1.2 }}>{page.headline}</h1>}
-                {page.subline  && <p  style={{ fontSize:"1.05rem", color:"#6b7280" }}>{page.subline}</p>}
+                <div className="inline-field">
+                  <h1
+                    className="inline-editable"
+                    contentEditable
+                    suppressContentEditableWarning
+                    data-placeholder="Klikni a napiš nadpis..."
+                    onBlur={e => update("headline", e.currentTarget.innerText)}
+                    style={{ fontSize:"1.9rem", fontWeight:800, color:"#1e1b4b", marginBottom:"10px", lineHeight:1.2, outline:"none" }}
+                    dangerouslySetInnerHTML={{ __html: page.headline || "" }}
+                  />
+                </div>
+                <div className="inline-field">
+                  <p
+                    className="inline-editable"
+                    contentEditable
+                    suppressContentEditableWarning
+                    data-placeholder="Klikni a napiš podnadpis..."
+                    onBlur={e => update("subline", e.currentTarget.innerText)}
+                    style={{ fontSize:"1.05rem", color:"#6b7280", outline:"none" }}
+                    dangerouslySetInnerHTML={{ __html: page.subline || "" }}
+                  />
+                </div>
               </div>
-              <div style={{ padding:"24px 40px", borderBottom:"1px solid #f0f0f0" }}>
+
+              {/* Body text sekce */}
+              <div className="inline-section" style={{ padding:"24px 40px", borderBottom:"1px solid #f0f0f0" }}>
+                <span className="inline-section-label">Tělo stránky</span>
                 {mediaBlocks.filter(m => (m.position || "below") === "above").map((m, i) => renderMediaBlock(m, i))}
-                {page.text && <div className="page-content" style={{ fontSize:".95rem", color:"#374151", lineHeight:1.75 }} dangerouslySetInnerHTML={{ __html: page.text }} />}
+                <div
+                  className="inline-editable page-content"
+                  contentEditable
+                  suppressContentEditableWarning
+                  data-placeholder="Klikni a začni psát obsah stránky..."
+                  onBlur={e => { update("text", e.currentTarget.innerHTML); setEditorInitialHtml(e.currentTarget.innerHTML); setEditorKey(k => k+1); }}
+                  style={{ fontSize:".95rem", color:"#374151", lineHeight:1.75, outline:"none", minHeight:"60px" }}
+                  dangerouslySetInnerHTML={{ __html: page.text || "" }}
+                />
                 {mediaBlocks.filter(m => (m.position || "below") === "below").map((m, i) => renderMediaBlock(m, i))}
                 <div style={{ clear:"both" }} />
                 {page.video && <div style={{ marginTop:"16px", borderRadius:"10px", overflow:"hidden", aspectRatio:"16/9" }}><iframe src={page.video.replace("watch?v=","embed/")} style={{ width:"100%", height:"100%", border:"none" }} allowFullScreen /></div>}
               </div>
-              <div style={{ padding:"24px 40px 32px" }}>
+
+              {/* Formulář + CTA sekce */}
+              <div className="inline-section" style={{ padding:"24px 40px 32px" }}>
+                <span className="inline-section-label">CTA & Formulář</span>
                 <div style={{ display:"flex", flexDirection:"column", gap:"8px" }}>
                   {formFields.map((f, i) => {
                     if (f === "Zpráva") return <textarea key={i} placeholder="Zpráva" style={{ border:"1px solid #e5e7eb", borderRadius:"7px", padding:"9px 12px", fontSize:".9rem", minHeight:"60px", resize:"none", fontFamily:"inherit", background:"#f9fafb", outline:"none" }} />;
@@ -1104,8 +1155,29 @@ export default function PageEditor() {
                     return <input key={i} placeholder={f} style={{ border:"1px solid #e5e7eb", borderRadius:"7px", padding:"9px 12px", fontSize:".9rem", background:"#f9fafb", outline:"none" }} />;
                   })}
                   <div style={{ background:"#f9fafb", border:"1px solid #e5e7eb", borderRadius:"7px", padding:"9px 12px", fontSize:".82rem", color:"#6b7280", display:"flex", alignItems:"center", gap:"6px" }}>💳 Platební brána (Stripe / GoPay)</div>
-                  {page.price   && <div style={{ fontSize:"1.9rem", fontWeight:800, color:"#7c3aed" }}>{page.price}</div>}
-                  {page.btnText && <a href={page.btnUrl || "#"} style={{ display:"block", padding:"13px", background:"#7c3aed", color:"#fff", borderRadius:"9px", textDecoration:"none", fontWeight:700, fontSize:"1rem", textAlign:"center" }}>{page.btnText}</a>}
+
+                  {/* Editovatelná cena */}
+                  <div
+                    className="inline-editable"
+                    contentEditable
+                    suppressContentEditableWarning
+                    data-placeholder="Klikni a napiš cenu..."
+                    onBlur={e => update("price", e.currentTarget.innerText)}
+                    style={{ fontSize:"1.9rem", fontWeight:800, color:"#7c3aed", outline:"none", minHeight:"1em" }}
+                    dangerouslySetInnerHTML={{ __html: page.price || "" }}
+                  />
+
+                  {/* Editovatelné tlačítko */}
+                  <div
+                    className="inline-editable"
+                    contentEditable
+                    suppressContentEditableWarning
+                    data-placeholder="Text tlačítka..."
+                    onBlur={e => update("btnText", e.currentTarget.innerText)}
+                    style={{ display:"block", padding:"13px", background:"#7c3aed", color:"#fff", borderRadius:"9px", fontWeight:700, fontSize:"1rem", textAlign:"center", outline:"none", cursor:"text" }}
+                    dangerouslySetInnerHTML={{ __html: page.btnText || "" }}
+                  />
+
                   <div style={{ display:"flex", gap:"6px", flexWrap:"wrap", marginTop:"4px" }}>
                     <span style={{ fontSize:"11px", fontWeight:600, padding:"3px 10px", borderRadius:"7px", background:"#d1fae5", color:"#059669" }}>✅ {positiveAction === "next_page" ? "→ Další stránka funnelu" : "→ Děkovací stránka"}</span>
                     {dualOutput && <span style={{ fontSize:"11px", fontWeight:600, padding:"3px 10px", borderRadius:"7px", background:"#fee2e2", color:"#dc2626" }}>❌ {negativeAction === "downsell" ? "→ Downsell" : negativeAction === "exit" ? "→ Exit nabídka" : "→ Nurture sekvence"}</span>}
