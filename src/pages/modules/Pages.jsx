@@ -245,7 +245,11 @@ export default function Pages() {
 
       {/* Hlavička */}
       <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:"20px", gap:"10px", flexWrap:"wrap" }}>
-        <h1 style={{ fontSize: isMobile ? "1.2rem" : "1.4rem", fontWeight:700 }}>Moje stránky</h1>
+        <div style={{ display:"flex", alignItems:"center", gap:"10px" }}>
+          <button className="btn btn-outline" onClick={() => navigate("/dashboard")}>← Dashboard</button>
+          <h1 style={{ fontSize: isMobile ? "1.1rem" : "1.4rem", fontWeight:700 }}>Moje stránky</h1>
+        </div>
+        </div>
         <div style={{ display:"flex", gap:"8px" }}>
           <button className="btn btn-outline" onClick={() => setModal({ type:"newFolder", data:{ name:"", color: COLORS[0] } })}>
             {isMobile ? "📁" : "📁 Nová složka"}
