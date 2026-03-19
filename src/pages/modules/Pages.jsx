@@ -249,7 +249,6 @@ export default function Pages() {
           <button className="btn btn-outline" onClick={() => navigate("/dashboard")}>← Dashboard</button>
           <h1 style={{ fontSize: isMobile ? "1.1rem" : "1.4rem", fontWeight:700 }}>Moje stránky</h1>
         </div>
-        </div>
         <div style={{ display:"flex", gap:"8px" }}>
           <button className="btn btn-outline" onClick={() => setModal({ type:"newFolder", data:{ name:"", color: COLORS[0] } })}>
             {isMobile ? "📁" : "📁 Nová složka"}
