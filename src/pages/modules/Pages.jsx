@@ -34,49 +34,88 @@ const LANGUAGES = [
 ];
 
 const LANG_FLAGS = Object.fromEntries(LANGUAGES.map(l => [l.code, l.flag]));
-const TRANSLATE_FIELDS = ["name","headline","subline","text","btnText","price"];
 
 // ─── Cloud AI volání ──────────────────────────────────────────────────────────
 async function callCloudAI(prompt) {
   const fn = httpsCallable(getFunctions(app), "translate");
   const result = await fn({ prompt, max_tokens: 4000 });
-  const raw = result.data.result || "";
-
-  // Bezpečný JSON parse — ořízne případný neúplný konec
-  const clean = raw.replace(/```json|```/g, "").trim();
+  const raw = (result.data.result || "").trim();
+  const jsonMatch = raw.match(/\{[\s\S]*\}/);
+  if (!jsonMatch) throw new Error("AI nevrátila JSON.");
   try {
-    return JSON.parse(clean);
+    return JSON.parse(jsonMatch[0]);
   } catch {
-    // Pokud JSON není kompletní, zkus najít poslední platnou hodnotu
-    const fixed = clean.replace(/,\s*"[^"]*":\s*"[^"]*$/, "").replace(/,?\s*$/, "") + "}";
+    const fixed = jsonMatch[0].replace(/,\s*"[^"]*":\s*"[^"]*$/, "").replace(/,?\s*$/, "") + "}}";
     try { return JSON.parse(fixed); }
-    catch { throw new Error(`AI vrátila neplatný JSON. Zkus kratší text stránky.`); }
+    catch { throw new Error("AI vrátila neplatný JSON."); }
   }
 }
 
-// ─── Překlad jedné stránky ────────────────────────────────────────────────────
-async function translatePage(page, targetLang, user) {
-  const lang = LANGUAGES.find(l => l.code === targetLang);
-  const fields = TRANSLATE_FIELDS
-    .filter(f => page[f])
-    .map(f => `${f}: ${page[f]}`)
-    .join("\n");
+// ─── Překlad jedné stránky (včetně Hero sekce) ───────────────────────────────
+async function translatePage(page, targetLangCode, user) {
+  const lang = LANGUAGES.find(l => l.code === targetLangCode);
+  const hero = page.hero || page.heroes?.full || {};
+  const formFields = page.formFields || ["Jméno", "Email"];
 
-  const translated = await callCloudAI(
-    `Přelož pole prodejní stránky do jazyka: ${lang.name}.
-Vrať POUZE JSON se stejnými klíči, zachovej HTML tagy v poli text, URL a ceny nechej beze změny.
-${fields}
-Formát: {"name":"...","headline":"...","subline":"...","text":"...","btnText":"...","price":"..."}`
-  );
+  const prompt = `Jsi profesionální překladatel. Přelož VEŠKERÝ text do jazyka: ${lang.name}.
+
+DŮLEŽITÉ PRAVIDLA:
+- Zachovej veškeré HTML tagy v poli "text" beze změny
+- Přelož POUZE textový obsah, ne HTML atributy ani URL
+- Vrať POUZE čistý JSON bez markdown backticks
+- Emoji ponechej beze změny
+- Pole formFields přelož jako pole stringů
+
+Přelož tato pole:
+{
+  "name": ${JSON.stringify(page.name || "")},
+  "headline": ${JSON.stringify(page.headline || "")},
+  "subline": ${JSON.stringify(page.subline || "")},
+  "text": ${JSON.stringify(page.text || "")},
+  "btnText": ${JSON.stringify(page.btnText || "")},
+  "price": ${JSON.stringify(page.price || "")},
+  "formFields": ${JSON.stringify(formFields)},
+  "hero": {
+    "badgeText": ${JSON.stringify(hero.badgeText || "")},
+    "h1Line1": ${JSON.stringify(hero.h1Line1 || "")},
+    "h1Accent": ${JSON.stringify(hero.h1Accent || "")},
+    "h1Line2": ${JSON.stringify(hero.h1Line2 || "")},
+    "subText": ${JSON.stringify(hero.subText || "")},
+    "btn1Text": ${JSON.stringify(hero.btn1Text || "")},
+    "btn2Text": ${JSON.stringify(hero.btn2Text || "")}
+  }
+}
+
+Vrať přesně stejnou strukturu JSON s přeloženými hodnotami.`;
+
+  const parsed = await callCloudAI(prompt);
+
+  const translatedHero = parsed.hero ? {
+    ...hero,
+    badgeText: parsed.hero.badgeText || hero.badgeText,
+    h1Line1:   parsed.hero.h1Line1   || hero.h1Line1,
+    h1Accent:  parsed.hero.h1Accent  || hero.h1Accent,
+    h1Line2:   parsed.hero.h1Line2   || hero.h1Line2,
+    subText:   parsed.hero.subText   || hero.subText,
+    btn1Text:  parsed.hero.btn1Text  || hero.btn1Text,
+    btn2Text:  parsed.hero.btn2Text  || hero.btn2Text,
+  } : hero;
 
   const newPage = {
     ...page,
-    ...translated,
-    lang: targetLang,
-    name: translated.name || `${page.name} (${lang.flag} ${lang.name})`,
-    uid: user.uid,
-    createdAt: Date.now(),
-    published: false,
+    name:       parsed.name       || page.name,
+    headline:   parsed.headline   || page.headline,
+    subline:    parsed.subline    || page.subline,
+    text:       parsed.text       || page.text,
+    btnText:    parsed.btnText    || page.btnText,
+    price:      parsed.price      || page.price,
+    formFields: parsed.formFields || formFields,
+    hero:       translatedHero,
+    heroes:     { full: translatedHero },
+    lang:       targetLangCode,
+    uid:        user.uid,
+    createdAt:  Date.now(),
+    published:  false,
   };
   delete newPage.id;
   return newPage;
@@ -92,10 +131,7 @@ export default function Pages() {
   const [openFolders, setOpenFolders] = useState({});
   const [dragOver,    setDragOver]    = useState(null);
   const [modal, setModal] = useState(null);
-
-  // stav překladu složky: { folderId, progress: {done, total, current}, error }
   const [translateState, setTranslateState] = useState(null);
-
   const dragPageId = useRef(null);
 
   useEffect(() => {
@@ -108,7 +144,6 @@ export default function Pages() {
       const pageList   = pSnap.docs.map(d => ({ id: d.id, ...d.data() }));
       const folderList = fSnap.docs.map(d => ({ id: d.id, ...d.data() }));
       const withStats  = await Promise.all(pageList.map(async p => {
-        if (!p.id) return { ...p, visits: 0, conversions: 0 };
         try {
           const [vSnap, cSnap] = await Promise.all([
             getDocs(query(collection(db, "visits"),      where("pageId", "==", p.id))),
@@ -132,20 +167,26 @@ export default function Pages() {
     setFolders(f => [...f, { id: ref.id, uid: user.uid, name, color }]);
     setOpenFolders(o => ({ ...o, [ref.id]: true }));
   }
+
   async function updateFolder(id, name, color) {
     await updateDoc(doc(db, "folders", id), { name, color });
     setFolders(f => f.map(x => x.id === id ? { ...x, name, color } : x));
   }
-  async function deleteFolder(id) {
-    if (!confirm("Smazat složku? Stránky uvnitř zůstanou bez složky.")) return;
+
+  async function deleteFolder(id, deletePages) {
     await deleteDoc(doc(db, "folders", id));
-    await Promise.all(pages.filter(p => p.folderId === id).map(p => updateDoc(doc(db, "pages", p.id), { folderId: null })));
+    if (deletePages) {
+      await Promise.all(pages.filter(p => p.folderId === id).map(p => deleteDoc(doc(db, "pages", p.id))));
+      setPages(p => p.filter(x => x.folderId !== id));
+    } else {
+      await Promise.all(pages.filter(p => p.folderId === id).map(p => updateDoc(doc(db, "pages", p.id), { folderId: null })));
+      setPages(p => p.map(x => x.folderId === id ? { ...x, folderId: null } : x));
+    }
     setFolders(f => f.filter(x => x.id !== id));
-    setPages(p => p.map(x => x.folderId === id ? { ...x, folderId: null } : x));
+    setModal(null);
   }
 
-  // ── AI PŘEKLAD CELÉ SLOŽKY ───────────────────────────────────────────────────
-  // Otevře výběr jazyka, pak přeloží všechny stránky jednu po druhé
+  // ── AI PŘEKLAD SLOŽKY ───────────────────────────────────────────────────────
   function openFolderTranslate(folder) {
     setModal({ type: "translateFolder", folder });
   }
@@ -156,8 +197,6 @@ export default function Pages() {
     if (folderPages.length === 0) return;
 
     const lang = LANGUAGES.find(l => l.code === targetLangCode);
-
-    // 1. Vytvoř novou složku pro přeloženou verzi
     const newFolderRef = await addDoc(collection(db, "folders"), {
       uid: user.uid,
       name: `${folder.name} (${lang.flag} ${lang.name})`,
@@ -168,8 +207,6 @@ export default function Pages() {
     setFolders(f => [...f, newFolder]);
     setOpenFolders(o => ({ ...o, [newFolderRef.id]: true }));
 
-    // 2. Překládej stránky jednu po druhé (ne paralelně — šetří API limity)
-    const newPages = [];
     for (let i = 0; i < folderPages.length; i++) {
       const page = folderPages[i];
       setTranslateState({
@@ -180,10 +217,7 @@ export default function Pages() {
         const translated = await translatePage(page, targetLangCode, user);
         translated.folderId = newFolderRef.id;
         const ref = await addDoc(collection(db, "pages"), translated);
-        const newPage = { id: ref.id, ...translated, visits: 0, conversions: 0 };
-        newPages.push(newPage);
-        // Průběžně přidávej přeložené stránky do UI
-        setPages(p => [...p, newPage]);
+        setPages(p => [...p, { id: ref.id, ...translated, visits: 0, conversions: 0 }]);
       } catch (err) {
         console.error(`Chyba překladu stránky ${page.name}:`, err);
         setTranslateState(s => ({ ...s, error: `Chyba u stránky "${page.name}"` }));
@@ -207,11 +241,25 @@ export default function Pages() {
     });
     navigate(`/editor/${ref.id}`);
   }
+
   async function deletePage(id) {
     if (!confirm("Opravdu smazat tuto stránku?")) return;
     await deleteDoc(doc(db, "pages", id));
     setPages(p => p.filter(x => x.id !== id));
   }
+
+  async function publishPage(id) {
+    await updateDoc(doc(db, "pages", id), { published: true, publishedAt: Date.now() });
+    setPages(p => p.map(x => x.id === id ? { ...x, published: true, publishedAt: Date.now() } : x));
+  }
+
+  async function publishFolder(folderId) {
+    const fps = pages.filter(p => p.folderId === folderId);
+    const now = Date.now();
+    await Promise.all(fps.map(p => updateDoc(doc(db, "pages", p.id), { published: true, publishedAt: now })));
+    setPages(p => p.map(x => x.folderId === folderId ? { ...x, published: true, publishedAt: now } : x));
+  }
+
   async function movePage(pageId, folderId) {
     await updateDoc(doc(db, "pages", pageId), { folderId: folderId || null });
     setPages(p => p.map(x => x.id === pageId ? { ...x, folderId: folderId || null } : x));
@@ -271,17 +319,16 @@ export default function Pages() {
 
         return (
           <div key={folder.id} className="card"
-            style={{ marginBottom:"12px", padding:0, overflow:"hidden", transition:"box-shadow .15s", boxShadow: isDragTarget ? `0 0 0 2px ${folder.color}` : undefined }}
+            style={{ marginBottom:"12px", padding:0, overflow:"hidden", transition:"box-shadow .15s", borderLeft:`4px solid ${folder.color}`, boxShadow: isDragTarget ? `0 0 0 2px ${folder.color}` : undefined }}
             onDragOver={e => onDragOver(e, folder.id)}
             onDrop={e => onDrop(e, folder.id)}
             onDragLeave={() => setDragOver(null)}
           >
-            {/* záhlaví složky */}
             <div
               onClick={() => setOpenFolders(o => ({ ...o, [folder.id]: !o[folder.id] }))}
-              style={{ display:"flex", alignItems:"center", gap:"12px", padding:"14px 16px", cursor:"pointer", borderLeft:`4px solid ${folder.color}`, background: isDragTarget ? folder.color + "18" : undefined, transition:"background .15s" }}
+              style={{ display:"flex", alignItems:"center", gap:"12px", padding:"14px 16px", cursor:"pointer", background: isDragTarget ? folder.color + "18" : undefined, transition:"background .15s" }}
             >
-              <span style={{ fontSize:"1.2rem" }}>{isOpen ? "📂" : "📁"}</span>
+              <div style={{ width:"14px", height:"14px", borderRadius:"3px", background:folder.color, flexShrink:0 }}/>
               <span style={{ fontWeight:700, flex:1 }}>{folder.name}</span>
               <div style={{ display:"flex", gap:"16px", fontSize:".82rem", color:"var(--text-muted)" }}>
                 <span>📄 {stats.count}</span>
@@ -290,11 +337,17 @@ export default function Pages() {
                 <span style={{ color: stats.rate > 10 ? "#16a34a" : stats.rate > 5 ? "#d97706" : "var(--text-muted)", fontWeight:600 }}>{stats.rate} %</span>
               </div>
               <div style={{ display:"flex", gap:"6px" }} onClick={e => e.stopPropagation()}>
-                {/* 🌍 AI překlad složky */}
+                <button
+                  className="btn btn-outline"
+                  style={{ padding:"4px 10px", fontSize:".78rem", color:"#059669", borderColor:"#059669", background:"#f0fdf4", display:"flex", alignItems:"center", gap:"4px" }}
+                  title="Publikovat všechny stránky ve složce"
+                  onClick={() => publishFolder(folder.id)}
+                >
+                  🚀 Publikovat vše
+                </button>
                 <button
                   className="btn btn-outline"
                   style={{ padding:"4px 10px", fontSize:".78rem", color:"#7c3aed", borderColor:"#7c3aed", background:"#f5f3ff", display:"flex", alignItems:"center", gap:"4px" }}
-                  title="Přeložit celou složku do jiného jazyka"
                   onClick={() => openFolderTranslate(folder)}
                 >
                   🌍 Přeložit
@@ -304,7 +357,7 @@ export default function Pages() {
                 <button className="btn btn-outline" style={{ padding:"4px 10px", fontSize:".78rem" }}
                   onClick={() => createPage(folder.id)}>+</button>
                 <button className="btn btn-outline" style={{ padding:"4px 10px", fontSize:".78rem" }}
-                  onClick={() => deleteFolder(folder.id)}>🗑️</button>
+                  onClick={() => setModal({ type:"deleteFolder", folder })}>🗑️</button>
               </div>
             </div>
 
@@ -326,7 +379,7 @@ export default function Pages() {
               </div>
             )}
 
-            {/* stránky ve složce */}
+            {/* Stránky ve složce */}
             {isOpen && (
               <div style={{ borderTop:"1px solid var(--border)" }}>
                 {fps.length === 0 && (
@@ -337,6 +390,7 @@ export default function Pages() {
                 {fps.map(page => (
                   <PageRow key={page.id} page={page} navigate={navigate}
                     onDelete={deletePage}
+                    onPublish={publishPage}
                     onDragStart={() => onDragStart(page.id)}
                     onDragEnd={onDragEnd}
                   />
@@ -367,6 +421,7 @@ export default function Pages() {
           {unfoldered.map(page => (
             <PageRow key={page.id} page={page} navigate={navigate}
               onDelete={deletePage}
+              onPublish={publishPage}
               onDragStart={() => onDragStart(page.id)}
               onDragEnd={onDragEnd}
             />
@@ -395,6 +450,14 @@ export default function Pages() {
           onSave={async (name, color) => { await updateFolder(modal.data.id, name, color); setModal(null); }}
           onClose={() => setModal(null)} />
       )}
+      {modal?.type === "deleteFolder" && (
+        <DeleteFolderModal
+          folder={modal.folder}
+          pageCount={pages.filter(p => p.folderId === modal.folder.id).length}
+          onConfirm={(del) => deleteFolder(modal.folder.id, del)}
+          onClose={() => setModal(null)}
+        />
+      )}
       {modal?.type === "translateFolder" && (
         <TranslateFolderModal
           folder={modal.folder}
@@ -407,6 +470,41 @@ export default function Pages() {
   );
 }
 
+// ─── Modal: smazání složky ────────────────────────────────────────────────────
+function DeleteFolderModal({ folder, pageCount, onConfirm, onClose }) {
+  return (
+    <ModalWrap onClose={onClose}>
+      <h3 style={{ marginBottom:"8px", fontWeight:700 }}>🗑️ Smazat složku</h3>
+      <p style={{ fontSize:".88rem", color:"var(--text-muted)", marginBottom:"20px" }}>
+        Složka <strong>„{folder.name}"</strong> obsahuje <strong>{pageCount}</strong> {pageCount === 1 ? "stránku" : pageCount < 5 ? "stránky" : "stránek"}. Co chceš udělat se stránkami uvnitř?
+      </p>
+      <div style={{ display:"flex", flexDirection:"column", gap:"10px", marginBottom:"20px" }}>
+        <button
+          onClick={() => onConfirm(false)}
+          style={{ padding:"12px 16px", borderRadius:"10px", border:"1px solid var(--border)", background:"var(--bg-card)", cursor:"pointer", textAlign:"left", fontSize:".88rem" }}
+          onMouseEnter={e => e.currentTarget.style.borderColor = "#7c3aed"}
+          onMouseLeave={e => e.currentTarget.style.borderColor = "var(--border)"}
+        >
+          <div style={{ fontWeight:600, marginBottom:"3px" }}>📁 Smazat pouze složku</div>
+          <div style={{ fontSize:".8rem", color:"var(--text-muted)" }}>Stránky zůstanou — přesunou se do sekce „Bez složky"</div>
+        </button>
+        <button
+          onClick={() => onConfirm(true)}
+          style={{ padding:"12px 16px", borderRadius:"10px", border:"1px solid #fca5a5", background:"#fff1f2", cursor:"pointer", textAlign:"left", fontSize:".88rem" }}
+          onMouseEnter={e => e.currentTarget.style.background = "#fee2e2"}
+          onMouseLeave={e => e.currentTarget.style.background = "#fff1f2"}
+        >
+          <div style={{ fontWeight:600, color:"#dc2626", marginBottom:"3px" }}>🗑️ Smazat složku i všechny stránky</div>
+          <div style={{ fontSize:".8rem", color:"#ef4444" }}>Nevratná akce — smaže {pageCount} {pageCount === 1 ? "stránku" : pageCount < 5 ? "stránky" : "stránek"}</div>
+        </button>
+      </div>
+      <div style={{ display:"flex", justifyContent:"flex-end" }}>
+        <button className="btn btn-outline" onClick={onClose}>Zrušit</button>
+      </div>
+    </ModalWrap>
+  );
+}
+
 // ─── Modal: výběr jazyka pro překlad složky ───────────────────────────────────
 function TranslateFolderModal({ folder, pageCount, onTranslate, onClose }) {
   const [selected, setSelected] = useState(null);
@@ -414,42 +512,35 @@ function TranslateFolderModal({ folder, pageCount, onTranslate, onClose }) {
   return (
     <ModalWrap onClose={onClose}>
       <h3 style={{ marginBottom:"6px", fontWeight:700 }}>🌍 Přeložit složku</h3>
-      <p style={{ fontSize:".88rem", color:"var(--text-muted)", marginBottom:"16px" }}>
-        AI zkopíruje složku <strong>„{folder.name}"</strong> ({pageCount} {pageCount === 1 ? "stránka" : pageCount < 5 ? "stránky" : "stránek"}) a přeloží všechny stránky do zvoleného jazyka.
+      <p style={{ fontSize:".88rem", color:"var(--text-muted)", marginBottom:"6px" }}>
+        AI zkopíruje složku <strong>„{folder.name}"</strong> ({pageCount} {pageCount === 1 ? "stránka" : pageCount < 5 ? "stránky" : "stránek"}) a přeloží vše do zvoleného jazyka.
       </p>
-
+      <p style={{ fontSize:".8rem", color:"#7c3aed", marginBottom:"16px", background:"#f5f3ff", padding:"6px 10px", borderRadius:"6px" }}>
+        ✅ Překládá se: název, nadpisy, obsah, Hero sekce, formulář i tlačítka
+      </p>
       <label style={{ fontSize:".78rem", fontWeight:600, color:"var(--text-muted)", display:"block", marginBottom:"8px" }}>CÍLOVÝ JAZYK</label>
       <div style={{ display:"flex", flexWrap:"wrap", gap:"6px", marginBottom:"20px", maxHeight:"200px", overflowY:"auto" }}>
         {LANGUAGES.map(lang => (
-          <button key={lang.code}
-            onClick={() => setSelected(lang.code)}
-            style={{
-              padding:"6px 12px", borderRadius:"8px", fontSize:".85rem", cursor:"pointer",
+          <button key={lang.code} onClick={() => setSelected(lang.code)}
+            style={{ padding:"6px 12px", borderRadius:"8px", fontSize:".85rem", cursor:"pointer",
               border: selected === lang.code ? "2px solid #7c3aed" : "1px solid var(--border)",
               background: selected === lang.code ? "#f5f3ff" : "var(--bg-card)",
               color: selected === lang.code ? "#7c3aed" : "var(--text)",
-              fontWeight: selected === lang.code ? 600 : 400,
-            }}
-          >
+              fontWeight: selected === lang.code ? 600 : 400 }}>
             {lang.flag} {lang.name}
           </button>
         ))}
       </div>
-
       {selected && (
         <div style={{ background:"#f0fdf4", border:"1px solid #bbf7d0", borderRadius:"8px", padding:"10px 14px", marginBottom:"16px", fontSize:".82rem", color:"#166534" }}>
-          ✅ Vytvoří se nová složka <strong>„{folder.name} ({LANGUAGES.find(l=>l.code===selected)?.flag} {LANGUAGES.find(l=>l.code===selected)?.name})"</strong> se {pageCount} přeloženými stránkami. Originál zůstane nedotčen.
+          ✅ Vytvoří se nová složka <strong>„{folder.name} ({LANGUAGES.find(l=>l.code===selected)?.flag} {LANGUAGES.find(l=>l.code===selected)?.name})"</strong>. Originál zůstane nedotčen.
         </div>
       )}
-
       <div style={{ display:"flex", gap:"10px", justifyContent:"flex-end" }}>
         <button className="btn btn-outline" onClick={onClose}>Zrušit</button>
-        <button
-          className="btn btn-primary"
-          disabled={!selected}
+        <button className="btn btn-primary" disabled={!selected}
           onClick={() => selected && onTranslate(selected)}
-          style={{ opacity: selected ? 1 : 0.5, cursor: selected ? "pointer" : "not-allowed" }}
-        >
+          style={{ opacity: selected ? 1 : 0.5, cursor: selected ? "pointer" : "not-allowed" }}>
           🌍 Spustit překlad
         </button>
       </div>
@@ -458,11 +549,13 @@ function TranslateFolderModal({ folder, pageCount, onTranslate, onClose }) {
 }
 
 // ─── PageRow ──────────────────────────────────────────────────────────────────
-function PageRow({ page, navigate, onDelete, onDragStart, onDragEnd }) {
+function PageRow({ page, navigate, onDelete, onDragStart, onDragEnd, onPublish }) {
   const rate = page.visits > 0 ? Math.round((page.conversions / page.visits) * 100) : 0;
+  const isPublished = !!page.published;
+  const hasChanges  = page.updatedAt && page.publishedAt && page.updatedAt > page.publishedAt;
+
   return (
-    <div
-      draggable onDragStart={onDragStart} onDragEnd={onDragEnd}
+    <div draggable onDragStart={onDragStart} onDragEnd={onDragEnd}
       style={{ display:"flex", alignItems:"center", gap:"12px", padding:"12px 16px", borderBottom:"1px solid var(--border)", cursor:"grab", transition:"background .15s" }}
       onMouseEnter={e => e.currentTarget.style.background = "var(--bg)"}
       onMouseLeave={e => e.currentTarget.style.background = "transparent"}
@@ -470,8 +563,14 @@ function PageRow({ page, navigate, onDelete, onDragStart, onDragEnd }) {
       <span style={{ fontSize:".9rem", color:"var(--text-muted)", cursor:"grab" }}>⠿</span>
       <span style={{ fontSize:"1rem" }}>📄</span>
       {page.lang && <span style={{ fontSize:"1.1rem" }} title={page.lang}>{LANG_FLAGS[page.lang] || "🌐"}</span>}
-      <div style={{ flex:1, minWidth:0 }}>
-        <div style={{ fontWeight:600, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{page.name || "Bez názvu"}</div>
+      <div style={{ flex:1, minWidth:0, cursor:"pointer" }} onClick={() => navigate(`/editor/${page.id}`)}>
+        <div style={{ fontWeight:600, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", color:"var(--text)" }}
+          onMouseEnter={e => e.currentTarget.style.color = "#7c3aed"}
+          onMouseLeave={e => e.currentTarget.style.color = "var(--text)"}>
+          {page.name || "Bez názvu"}
+          {!isPublished && <span style={{ marginLeft:"6px", fontSize:"10px", fontWeight:700, padding:"1px 6px", borderRadius:"8px", background:"#fef9c3", color:"#854d0e" }}>Nepublikováno</span>}
+          {isPublished && hasChanges && <span style={{ marginLeft:"6px", fontSize:"10px", fontWeight:700, padding:"1px 6px", borderRadius:"8px", background:"#fff7ed", color:"#c2410c" }}>Nezveřejněné změny</span>}
+        </div>
         <div style={{ fontSize:".8rem", color:"var(--text-muted)" }}>{page.headline || "—"}</div>
       </div>
       <div style={{ display:"flex", gap:"20px", fontSize:".85rem", color:"var(--text-muted)" }}>
@@ -480,9 +579,18 @@ function PageRow({ page, navigate, onDelete, onDragStart, onDragEnd }) {
         <span style={{ color: rate > 10 ? "#16a34a" : rate > 5 ? "#d97706" : "var(--text-muted)", fontWeight:600 }}>{rate} %</span>
       </div>
       <div style={{ display:"flex", gap:"6px" }}>
-        <button className="btn btn-primary" style={{ padding:"5px 12px", fontSize:".8rem" }} onClick={() => navigate(`/editor/${page.id}`)}>Editovat</button>
-        <button className="btn btn-outline" style={{ padding:"5px 10px", fontSize:".8rem" }} onClick={() => window.open(`/p/${page.id}`, "_blank")}>👁️</button>
-        <button className="btn btn-outline" style={{ padding:"5px 10px", fontSize:".8rem" }} onClick={() => onDelete(page.id)}>🗑️</button>
+        {isPublished && !hasChanges ? (
+          <button className="btn btn-outline" style={{ padding:"5px 12px", fontSize:".8rem" }}
+            onClick={() => window.open(`/p/${page.id}`, "_blank")}>👁️ Náhled</button>
+        ) : (
+          <button
+            style={{ padding:"5px 12px", fontSize:".8rem", fontWeight:700, border:"none", borderRadius:"7px", cursor:"pointer", background: isPublished ? "#f97316" : "#7c3aed", color:"#fff", display:"flex", alignItems:"center", gap:"4px" }}
+            onClick={() => onPublish(page.id)}>
+            🚀 {isPublished ? "Zveřejnit změny" : "Publikovat"}
+          </button>
+        )}
+        <button className="btn btn-outline" style={{ padding:"5px 10px", fontSize:".8rem" }}
+          onClick={() => onDelete(page.id)}>🗑️</button>
       </div>
     </div>
   );

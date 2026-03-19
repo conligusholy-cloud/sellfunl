@@ -6,6 +6,8 @@ import { ref as storageRef, uploadBytesResumable, getDownloadURL } from "firebas
 import { getFunctions, httpsCallable } from "firebase/functions";
 import { useAuthState } from "../../hooks/useAuthState";
 import HeroEditor, { DEFAULT_HERO, buildHeroHtml } from "./HeroEditor";
+import AIPageGenerator from "../../components/AIPageGenerator";
+import AITranslator from "../../components/AITranslator";
 
 const LANGUAGES = [
   { code:"cs", flag:"🇨🇿", name:"Čeština" },
@@ -453,21 +455,6 @@ function Toast({ msg }) {
   return <div style={{ position:"fixed", bottom:"20px", right:"20px", background:"#1e1b4b", color:"#fff", padding:"10px 18px", borderRadius:"10px", fontSize:".88rem", fontWeight:500, zIndex:10000, boxShadow:"0 4px 20px rgba(0,0,0,.3)" }}>{msg}</div>;
 }
 
-function buildCreativePrompt(input, langName) {
-  return `Jsi světová třída copywriter a web designer. Vytvoř NEODOLATELNOU, moderní prodejní stránku v jazyce ${langName} pro: "${input}".
-Pravidla pro pole "text" (HTML obsah):
-- Použij <h2> pro hlavní sekce, <h3> pro podnadpisy
-- Přidej <strong> na klíčové výhody, <em> na emocionální fráze
-- Používej <ul><li> pro benefity a vlastnosti
-- Vkládej emoji přímo do textu 🔥✨💎⭐
-- Minimálně 4 odstavce/sekce, každá s vlastním nadpisem
-- Přidej sociální důkaz (fiktivní citát zákazníka v <blockquote>)
-- Urgence a scarcity v posledním odstavci
-Nadpis: silný, emocionální, obsahuje číslo nebo příslib. btnText: akční výzva.
-Vrať POUZE raw JSON bez markdown:
-{"name":"...","headline":"...","subline":"...","text":"<h2>...</h2>...","btnText":"...","price":"..."}`;
-}
-
 // ─── PageContent pro mockupy ──────────────────────────────────────────────────
 function PageContent({ hero, page, formFields, buildHeroHtml }) {
   return (
@@ -525,11 +512,8 @@ export default function PageEditor() {
 
   const [editorKey,         setEditorKey]         = useState(0);
   const [editorInitialHtml, setEditorInitialHtml] = useState("");
-  const [translating,         setTranslating]         = useState(false);
   const [showTranslatePicker, setShowTranslatePicker] = useState(false);
   const [showAIGen,    setShowAIGen]    = useState(false);
-  const [aiGenInput,   setAiGenInput]   = useState("");
-  const [aiGenLoading, setAiGenLoading] = useState(false);
   const [aiEditInput,   setAiEditInput]   = useState("");
   const [aiEditLoading, setAiEditLoading] = useState(false);
   const [mediaBlocks,   setMediaBlocks]   = useState([]);
@@ -566,6 +550,7 @@ export default function PageEditor() {
         const data = { id: snap.id, ...snap.data() };
         setPage(data);
         setEditorInitialHtml(data.text || "");
+        if (data.formFields) setFormFields(data.formFields);
         if (data.heroes) {
           setHeroes(data.heroes);
         } else if (data.hero) {
@@ -583,7 +568,7 @@ export default function PageEditor() {
 
   async function handleSave() {
     const { id: _id, ...data } = page;
-    await updateDoc(doc(db, "pages", id), { ...data, heroes, hero: heroes["full"] || DEFAULT_HERO });
+    await updateDoc(doc(db, "pages", id), { ...data, heroes, hero: heroes["full"] || DEFAULT_HERO, formFields, updatedAt: Date.now() });
     showToast("✓ Uloženo");
   }
 
@@ -591,7 +576,7 @@ export default function PageEditor() {
     setPublishing(true);
     try {
       const { id: _id, ...data } = page;
-      await updateDoc(doc(db, "pages", id), { ...data, heroes, hero: heroes["full"] || DEFAULT_HERO, published: true, publishedAt: Date.now() });
+      await updateDoc(doc(db, "pages", id), { ...data, heroes, hero: heroes["full"] || DEFAULT_HERO, formFields, published: true, publishedAt: Date.now(), updatedAt: Date.now() });
       setPage(p => ({ ...p, published: true }));
       const url = `${PUBLIC_BASE_URL}${id}`;
       await navigator.clipboard.writeText(url);
@@ -614,23 +599,6 @@ export default function PageEditor() {
     }
   }
 
-  async function handleAIGen() {
-    if (!aiGenInput.trim()) return;
-    setAiGenLoading(true);
-    try {
-      const lang = LANGUAGES.find(l => l.code === (page?.lang || "cs"))?.name || "Čeština";
-      const parsed = await callCloudAI(buildCreativePrompt(aiGenInput, lang));
-      const newText = parsed.text || "";
-      setPage(p => ({ ...p, name: parsed.name||p.name, headline: parsed.headline||p.headline, subline: parsed.subline||p.subline, text: newText, btnText: parsed.btnText||p.btnText, price: parsed.price||p.price }));
-      setEditorInitialHtml(newText);
-      setEditorKey(k => k + 1);
-      setActiveTab(1);
-      setShowAIGen(false);
-      showToast("✨ Stránka vygenerována!");
-    } catch (err) { showToast("AI generátor selhal: " + err.message); }
-    finally { setAiGenLoading(false); }
-  }
-
   async function handleAIEdit() {
     if (!aiEditInput.trim()) return;
     setAiEditLoading(true);
@@ -643,20 +611,7 @@ export default function PageEditor() {
     finally { setAiEditLoading(false); }
   }
 
-  async function handleTranslate(targetLangCode) {
-    const lang = LANGUAGES.find(l => l.code === targetLangCode);
-    if (!lang) return;
-    setTranslating(true); setShowTranslatePicker(false);
-    try {
-      const fields = ["name","headline","subline","text","btnText","price"].filter(f => page[f]).map(f => `${f}: ${page[f]}`).join("\n");
-      const translated = await callCloudAI(`Přelož pole prodejní stránky do jazyka: ${lang.name}. Vrať POUZE JSON se stejnými klíči, zachovej HTML tagy v poli text.\n${fields}\nFormát: {"name":"...","headline":"...","subline":"...","text":"...","btnText":"...","price":"..."}`);
-      const newPage = { ...page, ...translated, lang: targetLangCode, name: translated.name || `${page.name} (${lang.flag} ${lang.name})`, folderId: page.folderId||null, uid: user.uid, createdAt: Date.now() };
-      delete newPage.id;
-      const ref = await addDoc(collection(db, "pages"), newPage);
-      navigate(`/editor/${ref.id}`);
-    } catch { showToast("Překlad selhal."); }
-    finally { setTranslating(false); }
-  }
+
 
   function renderMediaBlock(m, i) {
     const w = m.width||100, aln = m.align||"full", flt = m.float||"none", mg = m.margin||0, wrap = flt !== "none";
@@ -685,6 +640,8 @@ export default function PageEditor() {
   const deviceLabel = DEVICES.find(d => d.key === devMode)?.label || "Desktop";
   const hasCustomHero = heroes[devMode] && devMode !== "full";
 
+  const hasUnpublishedChanges = page?.updatedAt && page?.publishedAt && page.updatedAt > page.publishedAt;
+
   if (loading) return <div className="loading">Načítám editor...</div>;
   if (!page)   return <div className="loading">Stránka nenalezena.</div>;
 
@@ -712,8 +669,11 @@ export default function PageEditor() {
             <span style={{ fontWeight:700, flex:1, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", fontSize:".92rem" }}>{page.name || "Editor"}</span>
             <button style={S.btnOut} onClick={handleSave}>Uložit</button>
             <button onClick={handlePublish} disabled={publishing}
-              style={{ ...S.btnPrim, background: page.published ? "#059669" : "#7c3aed", display:"flex", alignItems:"center", gap:"5px" }}>
-              {publishing ? "⏳" : page.published ? "✓ Publikováno" : "🚀 Publikovat"}
+              style={{ ...S.btnPrim, background: page.published && !hasUnpublishedChanges ? "#059669" : "#7c3aed", display:"flex", alignItems:"center", gap:"5px", position:"relative" }}>
+              {publishing ? "⏳" : page.published && !hasUnpublishedChanges ? "✓ Publikováno" : "🚀 Publikovat"}
+              {hasUnpublishedChanges && (
+                <span style={{ position:"absolute", top:"-4px", right:"-4px", width:"10px", height:"10px", background:"#f97316", borderRadius:"50%", border:"2px solid white" }}/>
+              )}
             </button>
           </div>
 
@@ -734,24 +694,20 @@ export default function PageEditor() {
                 style={{ ...S.input, width:"auto", padding:"4px 8px", fontSize:".85rem" }}>
                 {LANGUAGES.map(l => <option key={l.code} value={l.code}>{l.flag} {l.name}</option>)}
               </select>
-              <button disabled={translating} onClick={() => setShowTranslatePicker(v => !v)}
-                style={{ marginLeft:"auto", padding:"5px 11px", fontSize:".8rem", fontWeight:600, border:"1px solid #7c3aed", borderRadius:"8px", background: translating ? "var(--bg)" : "#ede9fe", color:"#7c3aed", cursor: translating ? "not-allowed" : "pointer" }}>
-                {translating ? "⏳ Překládám..." : "🌍 Přeložit"}
+              <button onClick={() => setShowTranslatePicker(v => !v)}
+                style={{ marginLeft:"auto", padding:"5px 11px", fontSize:".8rem", fontWeight:600, border:"1px solid #7c3aed", borderRadius:"8px", background:"#ede9fe", color:"#7c3aed", cursor:"pointer" }}>
+                🌍 Přeložit
               </button>
             </div>
-            {showTranslatePicker && !translating && (
-              <div style={{ marginTop:"9px" }}>
-                <p style={{ fontSize:".75rem", color:"var(--text-muted)", marginBottom:"7px" }}>Vyber cílový jazyk:</p>
-                <div style={{ display:"flex", flexWrap:"wrap", gap:"5px" }}>
-                  {LANGUAGES.filter(l => l.code !== (page.lang || "cs")).map(lang => (
-                    <button key={lang.code} onClick={() => { setShowTranslatePicker(false); handleTranslate(lang.code); }}
-                      style={{ padding:"4px 9px", borderRadius:"7px", border:"1px solid var(--border)", background:"var(--bg-card)", cursor:"pointer", fontSize:".82rem" }}>
-                      {lang.flag} {lang.name}
-                    </button>
-                  ))}
-                </div>
-                <button onClick={() => setShowTranslatePicker(false)} style={{ marginTop:"7px", fontSize:".78rem", color:"var(--text-muted)", background:"none", border:"none", cursor:"pointer" }}>Zrušit</button>
-              </div>
+            {showTranslatePicker && (
+              <AITranslator
+                page={page}
+                hero={currentHero}
+                currentLang={page?.lang || "cs"}
+                userId={user?.uid}
+                onClose={() => setShowTranslatePicker(false)}
+                onNavigate={id => navigate(`/editor/${id}`)}
+              />
             )}
           </div>
 
@@ -765,33 +721,49 @@ export default function PageEditor() {
             ))}
           </div>
 
-          {/* ZÁLOŽKA 0: Hero + Název */}
+          {/* ZÁLOŽKA 0: Hero + AI Generátor */}
           {activeTab === 0 && (
             <div style={{ flex:1, overflowY:"auto", display:"flex", flexDirection:"column" }}>
               <div style={{ padding:"15px", borderBottom:"1px solid var(--border)" }}>
+
+                {/* ── GLOBÁLNÍ AI GENERÁTOR ── */}
+                {showAIGen && (
+                  <AIPageGenerator
+                    lang={page?.lang || "cs"}
+                    onGenerated={({ page: p, hero: h }) => {
+                      setPage(prev => ({ ...prev, ...p }));
+                      setEditorInitialHtml(p.text || "");
+                      setEditorKey(k => k + 1);
+                      if (h) {
+                        const newHero = {
+                          ...DEFAULT_HERO,
+                          ...h,
+                          showBadge: true,
+                          showH1:    true,
+                          showSub:   true,
+                          btn1:      true,
+                          btn2:      true,
+                        };
+                        setHeroes(prev => ({ ...prev, [devMode]: newHero }));
+                      }
+                      setShowAIGen(false);
+                      showToast("✨ Celá stránka vygenerována!");
+                    }}
+                    onClose={() => setShowAIGen(false)}
+                  />
+                )}
+
                 <FieldInput label="Název stránky"     value={page.name}     onChange={v => update("name", v)}     placeholder="např. Prodejní stránka" />
                 <FieldInput label="Nadpis (headline)" value={page.headline} onChange={v => update("headline", v)} placeholder="Silný, emocionální nadpis" />
                 <FieldInput label="Podnadpis"         value={page.subline}  onChange={v => update("subline", v)}  placeholder="Krátký podpůrný podnadpis" />
                 <div style={{ display:"flex", gap:"8px", marginTop:"4px" }}>
-                  <button style={{ ...S.btnOut, flex:1 }} onClick={() => setShowTranslatePicker(v => !v)}>🌐 Přeložit</button>
-                  <button style={{ ...S.btnPrim, flex:2 }} onClick={() => setShowAIGen(v => !v)}>✨ AI generátor</button>
+                  <button style={{ ...S.btnOut, flex:1 }} onClick={() => setShowTranslatePicker(v => !v)}>🌐 Přeložit</button>                  <button style={{ ...S.btnPrim, flex:2 }} onClick={() => setShowAIGen(v => !v)}>
+                    ✨ AI generátor stránky
+                  </button>
                 </div>
-                {showAIGen && (
-                  <div style={{ ...S.card, marginTop:"11px" }}>
-                    <span style={S.lbl}>Popis produktu / tématu</span>
-                    <textarea rows={3} placeholder="Např. Prací prášek Pradlomat, silný na skvrny, cena 299 Kč."
-                      value={aiGenInput} onChange={e => setAiGenInput(e.target.value)}
-                      style={{ ...S.input, resize:"vertical", minHeight:"70px" }} />
-                    <p style={{ fontSize:".75rem", color:"var(--text-muted)", margin:"6px 0 8px" }}>💡 AI vygeneruje bohatě formátovaný text s nadpisy, odrážkami a emoji.</p>
-                    <div style={{ ...S.row, justifyContent:"flex-end" }}>
-                      <button style={S.btnOut} onClick={() => setShowAIGen(false)}>Zrušit</button>
-                      <button style={S.btnPrim} onClick={handleAIGen} disabled={aiGenLoading}>{aiGenLoading ? "⏳ Generuji..." : "✨ Vygenerovat"}</button>
-                    </div>
-                  </div>
-                )}
               </div>
 
-              {/* Indikátor aktuálního zařízení + reset */}
+              {/* Indikátor zařízení */}
               <div style={{ padding:"8px 15px", background: hasCustomHero ? "#ede9fe" : "var(--bg)", borderBottom:"1px solid var(--border)", display:"flex", alignItems:"center", gap:"8px", flexShrink:0 }}>
                 <span style={{ fontSize:"11px", fontWeight:600, color: hasCustomHero ? "#7c3aed" : "var(--text-muted)" }}>
                   {hasCustomHero ? "✏️" : "📋"} Nastavení pro: <strong>{deviceLabel}</strong>
@@ -980,21 +952,11 @@ export default function PageEditor() {
         {/* ══ PRAVÝ NÁHLED ══ */}
         <div style={{ flex:1, overflowY:"auto", background: isMockup ? "#1a1a2e" : "#f0f0f5", display:"flex", flexDirection:"column", alignItems: isMockup ? "center" : devMode === "full" ? "stretch" : "center" }}>
 
-          {/* ── OPRAVENÝ TOOLBAR ── */}
+          {/* Toolbar */}
           <div style={{ display:"flex", gap:"5px", padding:"8px 12px", background: isMockup ? "#16162a" : "#ffffff", justifyContent:"center", borderBottom:`1px solid ${isMockup ? "#2e2e4e" : "#e5e5f0"}`, flexWrap:"wrap", flexShrink:0, width:"100%" }}>
             {DEVICES.map(d => (
               <button key={d.key} onClick={() => switchDevice(d.key)}
-                style={{
-                  padding:"5px 10px",
-                  fontSize:".78rem",
-                  border:`1px solid ${devMode===d.key ? "#7c3aed" : isMockup ? "rgba(255,255,255,.2)" : "#d1d5db"}`,
-                  borderRadius:"7px",
-                  background: devMode===d.key ? "#7c3aed" : isMockup ? "transparent" : "#f9fafb",
-                  color: devMode===d.key ? "#fff" : isMockup ? "rgba(255,255,255,.6)" : "#374151",
-                  cursor:"pointer",
-                  position:"relative",
-                  fontWeight: devMode===d.key ? 600 : 400,
-                }}>
+                style={{ padding:"5px 10px", fontSize:".78rem", border:`1px solid ${devMode===d.key ? "#7c3aed" : isMockup ? "rgba(255,255,255,.2)" : "#d1d5db"}`, borderRadius:"7px", background: devMode===d.key ? "#7c3aed" : isMockup ? "transparent" : "#f9fafb", color: devMode===d.key ? "#fff" : isMockup ? "rgba(255,255,255,.6)" : "#374151", cursor:"pointer", position:"relative", fontWeight: devMode===d.key ? 600 : 400 }}>
                 {d.label}
                 {heroes[d.key] && d.key !== "full" && (
                   <span style={{ position:"absolute", top:"2px", right:"2px", width:"6px", height:"6px", background: devMode===d.key ? "#fff" : "#7c3aed", borderRadius:"50%" }} />
@@ -1084,46 +1046,34 @@ export default function PageEditor() {
                     }}
                     style={{ border:"none", width:"100%", minHeight: currentHero.height === "100vh" ? "100vh" : (currentHero.height || "500px"), display:"block", overflow:"hidden" }}
                   />
-
-                  {/* ── HERO CLICK OVERLAY ── */}
                   <style>{`
                     .hero-zone { position:absolute; cursor:pointer; border:2px solid transparent; border-radius:6px; transition:border-color .15s, background .15s; }
                     .hero-zone:hover { border-color:#7c3aed88; background:rgba(124,58,237,.08); }
                     .hero-zone:hover .hero-zone-tip { display:flex; }
                     .hero-zone-tip { display:none; position:absolute; top:-26px; left:0; background:#7c3aed; color:#fff; font-size:10px; font-weight:700; padding:3px 8px; border-radius:4px; white-space:nowrap; z-index:10; align-items:center; gap:4px; pointer-events:none; }
                   `}</style>
-
-                  {/* Badge */}
                   {currentHero.showBadge && (
                     <div className="hero-zone" style={{ top:"14%", left:"4%", width:"30%", height:"7%" }}
                       onClick={() => { setActiveTab(0); setTimeout(() => { const el = panelRef.current?.querySelector('[data-hero-field="badgeText"]'); el?.focus(); el?.scrollIntoView({ behavior:"smooth", block:"center" }); }, 100); }}>
                       <span className="hero-zone-tip">✏️ Badge text</span>
                     </div>
                   )}
-
-                  {/* H1 nadpis */}
                   {currentHero.showH1 && (
                     <div className="hero-zone" style={{ top:"22%", left:"3%", width:"55%", height:"28%" }}
                       onClick={() => { setActiveTab(0); setTimeout(() => { const el = panelRef.current?.querySelector('[data-hero-field="h1Line1"]'); el?.focus(); el?.scrollIntoView({ behavior:"smooth", block:"center" }); }, 100); }}>
                       <span className="hero-zone-tip">✏️ Hlavní nadpis</span>
                     </div>
                   )}
-
-                  {/* Subtext */}
                   {currentHero.showSub && (
                     <div className="hero-zone" style={{ top:"51%", left:"3%", width:"50%", height:"10%" }}
                       onClick={() => { setActiveTab(0); setTimeout(() => { const el = panelRef.current?.querySelector('[data-hero-field="subText"]'); el?.focus(); el?.scrollIntoView({ behavior:"smooth", block:"center" }); }, 100); }}>
                       <span className="hero-zone-tip">✏️ Podnadpis</span>
                     </div>
                   )}
-
-                  {/* Tlačítka */}
                   <div className="hero-zone" style={{ top:"68%", left:"3%", width:"45%", height:"14%" }}
                     onClick={() => { setActiveTab(0); setTimeout(() => { const el = panelRef.current?.querySelector('[data-hero-field="btn1Text"]'); el?.focus(); el?.scrollIntoView({ behavior:"smooth", block:"center" }); }, 100); }}>
                     <span className="hero-zone-tip">✏️ Tlačítka</span>
                   </div>
-
-                  {/* Media box */}
                   {currentHero.showMedia && (
                     <div className="hero-zone" style={{ top:"8%", right:"2%", width:"38%", height:"80%" }}
                       onClick={() => { setActiveTab(0); setTimeout(() => { const el = panelRef.current?.querySelector('[data-hero-field="mediaUpload"]'); el?.scrollIntoView({ behavior:"smooth", block:"center" }); }, 100); }}>
@@ -1133,7 +1083,6 @@ export default function PageEditor() {
                 </div>
               )}
 
-              {/* ── INLINE EDITABLE SEKCE ── */}
               <style>{`
                 .inline-field { position:relative; }
                 .inline-field:hover::after { content:'✏️'; position:absolute; top:4px; right:6px; font-size:12px; opacity:.5; pointer-events:none; }
@@ -1147,53 +1096,36 @@ export default function PageEditor() {
                 .inline-section:hover .inline-section-label { display:block; }
               `}</style>
 
-              {/* Headline + Subline sekce */}
               <div className="inline-section" style={{ padding:"32px 40px 24px", borderBottom:"1px solid #f0f0f0" }}>
                 <span className="inline-section-label">Hero text</span>
                 {page.image && <img src={page.image} alt="" style={{ width:"100%", maxHeight:"300px", objectFit:"cover", borderRadius:"10px", marginBottom:"20px" }} onError={e => e.target.style.display="none"} />}
                 <div className="inline-field">
-                  <h1
-                    className="inline-editable"
-                    contentEditable
-                    suppressContentEditableWarning
-                    data-placeholder="Klikni a napiš nadpis..."
+                  <h1 className="inline-editable" contentEditable suppressContentEditableWarning data-placeholder="Klikni a napiš nadpis..."
                     onBlur={e => update("headline", e.currentTarget.innerText)}
                     style={{ fontSize:"1.9rem", fontWeight:800, color:"#1e1b4b", marginBottom:"10px", lineHeight:1.2, outline:"none" }}
-                    dangerouslySetInnerHTML={{ __html: page.headline || "" }}
-                  />
+                    dangerouslySetInnerHTML={{ __html: page.headline || "" }} />
                 </div>
                 <div className="inline-field">
-                  <p
-                    className="inline-editable"
-                    contentEditable
-                    suppressContentEditableWarning
-                    data-placeholder="Klikni a napiš podnadpis..."
+                  <p className="inline-editable" contentEditable suppressContentEditableWarning data-placeholder="Klikni a napiš podnadpis..."
                     onBlur={e => update("subline", e.currentTarget.innerText)}
                     style={{ fontSize:"1.05rem", color:"#6b7280", outline:"none" }}
-                    dangerouslySetInnerHTML={{ __html: page.subline || "" }}
-                  />
+                    dangerouslySetInnerHTML={{ __html: page.subline || "" }} />
                 </div>
               </div>
 
-              {/* Body text sekce */}
               <div className="inline-section" style={{ padding:"24px 40px", borderBottom:"1px solid #f0f0f0" }}>
                 <span className="inline-section-label">Tělo stránky</span>
                 {mediaBlocks.filter(m => (m.position || "below") === "above").map((m, i) => renderMediaBlock(m, i))}
-                <div
-                  className="inline-editable page-content"
-                  contentEditable
-                  suppressContentEditableWarning
+                <div className="inline-editable page-content" contentEditable suppressContentEditableWarning
                   data-placeholder="Klikni a začni psát obsah stránky..."
                   onBlur={e => { update("text", e.currentTarget.innerHTML); setEditorInitialHtml(e.currentTarget.innerHTML); setEditorKey(k => k+1); }}
                   style={{ fontSize:".95rem", color:"#374151", lineHeight:1.75, outline:"none", minHeight:"60px" }}
-                  dangerouslySetInnerHTML={{ __html: page.text || "" }}
-                />
+                  dangerouslySetInnerHTML={{ __html: page.text || "" }} />
                 {mediaBlocks.filter(m => (m.position || "below") === "below").map((m, i) => renderMediaBlock(m, i))}
                 <div style={{ clear:"both" }} />
                 {page.video && <div style={{ marginTop:"16px", borderRadius:"10px", overflow:"hidden", aspectRatio:"16/9" }}><iframe src={page.video.replace("watch?v=","embed/")} style={{ width:"100%", height:"100%", border:"none" }} allowFullScreen /></div>}
               </div>
 
-              {/* Formulář + CTA sekce */}
               <div className="inline-section" style={{ padding:"24px 40px 32px" }}>
                 <span className="inline-section-label">CTA & Formulář</span>
                 <div style={{ display:"flex", flexDirection:"column", gap:"8px" }}>
@@ -1203,29 +1135,14 @@ export default function PageEditor() {
                     return <input key={i} placeholder={f} style={{ border:"1px solid #e5e7eb", borderRadius:"7px", padding:"9px 12px", fontSize:".9rem", background:"#f9fafb", outline:"none" }} />;
                   })}
                   <div style={{ background:"#f9fafb", border:"1px solid #e5e7eb", borderRadius:"7px", padding:"9px 12px", fontSize:".82rem", color:"#6b7280", display:"flex", alignItems:"center", gap:"6px" }}>💳 Platební brána (Stripe / GoPay)</div>
-
-                  {/* Editovatelná cena */}
-                  <div
-                    className="inline-editable"
-                    contentEditable
-                    suppressContentEditableWarning
-                    data-placeholder="Klikni a napiš cenu..."
+                  <div className="inline-editable" contentEditable suppressContentEditableWarning data-placeholder="Klikni a napiš cenu..."
                     onBlur={e => update("price", e.currentTarget.innerText)}
                     style={{ fontSize:"1.9rem", fontWeight:800, color:"#7c3aed", outline:"none", minHeight:"1em" }}
-                    dangerouslySetInnerHTML={{ __html: page.price || "" }}
-                  />
-
-                  {/* Editovatelné tlačítko */}
-                  <div
-                    className="inline-editable"
-                    contentEditable
-                    suppressContentEditableWarning
-                    data-placeholder="Text tlačítka..."
+                    dangerouslySetInnerHTML={{ __html: page.price || "" }} />
+                  <div className="inline-editable" contentEditable suppressContentEditableWarning data-placeholder="Text tlačítka..."
                     onBlur={e => update("btnText", e.currentTarget.innerText)}
                     style={{ display:"block", padding:"13px", background:"#7c3aed", color:"#fff", borderRadius:"9px", fontWeight:700, fontSize:"1rem", textAlign:"center", outline:"none", cursor:"text" }}
-                    dangerouslySetInnerHTML={{ __html: page.btnText || "" }}
-                  />
-
+                    dangerouslySetInnerHTML={{ __html: page.btnText || "" }} />
                   <div style={{ display:"flex", gap:"6px", flexWrap:"wrap", marginTop:"4px" }}>
                     <span style={{ fontSize:"11px", fontWeight:600, padding:"3px 10px", borderRadius:"7px", background:"#d1fae5", color:"#059669" }}>✅ {positiveAction === "next_page" ? "→ Další stránka funnelu" : "→ Děkovací stránka"}</span>
                     {dualOutput && <span style={{ fontSize:"11px", fontWeight:600, padding:"3px 10px", borderRadius:"7px", background:"#fee2e2", color:"#dc2626" }}>❌ {negativeAction === "downsell" ? "→ Downsell" : negativeAction === "exit" ? "→ Exit nabídka" : "→ Nurture sekvence"}</span>}
