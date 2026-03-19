@@ -634,6 +634,8 @@ export default function PageEditor() {
     divider: { border:"none", borderTop:"1px solid var(--border)", margin:"13px 0" },
   };
 
+  const [mobileView, setMobileView] = useState("editor"); // "editor" | "preview"
+  const isMobile = window.innerWidth < 768;
   const isMockup = devMode.startsWith("mockup");
   const previewWidth = devMode === "mobile" ? "375px" : devMode === "tablet" ? "640px" : "100%";
   const publicUrl = `${PUBLIC_BASE_URL}${id}`;
@@ -658,10 +660,24 @@ export default function PageEditor() {
         />
       )}
 
-      <div style={{ display:"flex", height:"100vh", overflow:"hidden", fontFamily:"var(--font-sans,'Inter',sans-serif)" }}>
+      <div style={{ display:"flex", height:"100vh", overflow:"hidden", fontFamily:"var(--font-sans,'Inter',sans-serif)", flexDirection: isMobile ? "column" : "row" }}>
+
+        {/* MOBILNÍ PŘEPÍNAČ */}
+        {isMobile && (
+          <div style={{ display:"flex", background:"var(--bg-card)", borderBottom:"1px solid var(--border)", flexShrink:0 }}>
+            <button onClick={() => setMobileView("editor")}
+              style={{ flex:1, padding:"10px", fontSize:".85rem", fontWeight:600, border:"none", background: mobileView==="editor" ? "#7c3aed" : "transparent", color: mobileView==="editor" ? "#fff" : "var(--text-muted)", cursor:"pointer" }}>
+              ✏️ Editor
+            </button>
+            <button onClick={() => setMobileView("preview")}
+              style={{ flex:1, padding:"10px", fontSize:".85rem", fontWeight:600, border:"none", background: mobileView==="preview" ? "#7c3aed" : "transparent", color: mobileView==="preview" ? "#fff" : "var(--text-muted)", cursor:"pointer" }}>
+              👁️ Náhled
+            </button>
+          </div>
+        )}
 
         {/* ══ LEVÝ PANEL ══ */}
-        <div ref={panelRef} style={{ width:"380px", minWidth:"360px", background:"var(--bg-card)", borderRight:"1px solid var(--border)", display:"flex", flexDirection:"column", overflow:"hidden" }}>
+        <div ref={panelRef} style={{ width: isMobile ? "100%" : "380px", minWidth: isMobile ? "unset" : "360px", background:"var(--bg-card)", borderRight:"1px solid var(--border)", display: isMobile && mobileView !== "editor" ? "none" : "flex", flexDirection:"column", overflow:"hidden", flex: isMobile ? 1 : "unset" }}>
 
           {/* Topbar */}
           <div style={{ padding:"10px 14px", borderBottom:"1px solid var(--border)", display:"flex", alignItems:"center", gap:"7px", flexShrink:0 }}>
@@ -950,7 +966,7 @@ export default function PageEditor() {
         </div>
 
         {/* ══ PRAVÝ NÁHLED ══ */}
-        <div style={{ flex:1, overflowY:"auto", background: isMockup ? "#1a1a2e" : "#f0f0f5", display:"flex", flexDirection:"column", alignItems: isMockup ? "center" : devMode === "full" ? "stretch" : "center" }}>
+        <div style={{ flex:1, overflowY:"auto", background: isMockup ? "#1a1a2e" : "#f0f0f5", display: isMobile && mobileView !== "preview" ? "none" : "flex", flexDirection:"column", alignItems: isMockup ? "center" : devMode === "full" ? "stretch" : "center" }}>
 
           {/* Toolbar */}
           <div style={{ display:"flex", gap:"5px", padding:"8px 12px", background: isMockup ? "#16162a" : "#ffffff", justifyContent:"center", borderBottom:`1px solid ${isMockup ? "#2e2e4e" : "#e5e5f0"}`, flexWrap:"wrap", flexShrink:0, width:"100%" }}>

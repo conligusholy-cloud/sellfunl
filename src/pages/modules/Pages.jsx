@@ -35,6 +35,16 @@ const LANGUAGES = [
 
 const LANG_FLAGS = Object.fromEntries(LANGUAGES.map(l => [l.code, l.flag]));
 
+function useIsMobile() {
+  const [m, setM] = useState(window.innerWidth < 640);
+  useEffect(() => {
+    const h = () => setM(window.innerWidth < 640);
+    window.addEventListener("resize", h);
+    return () => window.removeEventListener("resize", h);
+  }, []);
+  return m;
+}
+
 // ─── Cloud AI volání ──────────────────────────────────────────────────────────
 async function callCloudAI(prompt) {
   const fn = httpsCallable(getFunctions(app), "translate");
@@ -42,31 +52,22 @@ async function callCloudAI(prompt) {
   const raw = (result.data.result || "").trim();
   const jsonMatch = raw.match(/\{[\s\S]*\}/);
   if (!jsonMatch) throw new Error("AI nevrátila JSON.");
-  try {
-    return JSON.parse(jsonMatch[0]);
-  } catch {
+  try { return JSON.parse(jsonMatch[0]); }
+  catch {
     const fixed = jsonMatch[0].replace(/,\s*"[^"]*":\s*"[^"]*$/, "").replace(/,?\s*$/, "") + "}}";
     try { return JSON.parse(fixed); }
     catch { throw new Error("AI vrátila neplatný JSON."); }
   }
 }
 
-// ─── Překlad jedné stránky (včetně Hero sekce) ───────────────────────────────
+// ─── Překlad jedné stránky ────────────────────────────────────────────────────
 async function translatePage(page, targetLangCode, user) {
   const lang = LANGUAGES.find(l => l.code === targetLangCode);
   const hero = page.hero || page.heroes?.full || {};
   const formFields = page.formFields || ["Jméno", "Email"];
 
   const prompt = `Jsi profesionální překladatel. Přelož VEŠKERÝ text do jazyka: ${lang.name}.
-
-DŮLEŽITÉ PRAVIDLA:
-- Zachovej veškeré HTML tagy v poli "text" beze změny
-- Přelož POUZE textový obsah, ne HTML atributy ani URL
-- Vrať POUZE čistý JSON bez markdown backticks
-- Emoji ponechej beze změny
-- Pole formFields přelož jako pole stringů
-
-Přelož tato pole:
+PRAVIDLA: Zachovej HTML tagy, vrať POUZE čistý JSON bez backticks, emoji ponechej.
 {
   "name": ${JSON.stringify(page.name || "")},
   "headline": ${JSON.stringify(page.headline || "")},
@@ -84,38 +85,25 @@ Přelož tato pole:
     "btn1Text": ${JSON.stringify(hero.btn1Text || "")},
     "btn2Text": ${JSON.stringify(hero.btn2Text || "")}
   }
-}
-
-Vrať přesně stejnou strukturu JSON s přeloženými hodnotami.`;
+}`;
 
   const parsed = await callCloudAI(prompt);
-
-  const translatedHero = parsed.hero ? {
-    ...hero,
-    badgeText: parsed.hero.badgeText || hero.badgeText,
-    h1Line1:   parsed.hero.h1Line1   || hero.h1Line1,
-    h1Accent:  parsed.hero.h1Accent  || hero.h1Accent,
-    h1Line2:   parsed.hero.h1Line2   || hero.h1Line2,
-    subText:   parsed.hero.subText   || hero.subText,
-    btn1Text:  parsed.hero.btn1Text  || hero.btn1Text,
-    btn2Text:  parsed.hero.btn2Text  || hero.btn2Text,
-  } : hero;
-
+  const translatedHero = parsed.hero ? { ...hero, ...parsed.hero } : hero;
   const newPage = {
     ...page,
-    name:       parsed.name       || page.name,
-    headline:   parsed.headline   || page.headline,
-    subline:    parsed.subline    || page.subline,
-    text:       parsed.text       || page.text,
-    btnText:    parsed.btnText    || page.btnText,
-    price:      parsed.price      || page.price,
+    name: parsed.name || page.name,
+    headline: parsed.headline || page.headline,
+    subline: parsed.subline || page.subline,
+    text: parsed.text || page.text,
+    btnText: parsed.btnText || page.btnText,
+    price: parsed.price || page.price,
     formFields: parsed.formFields || formFields,
-    hero:       translatedHero,
-    heroes:     { full: translatedHero },
-    lang:       targetLangCode,
-    uid:        user.uid,
-    createdAt:  Date.now(),
-    published:  false,
+    hero: translatedHero,
+    heroes: { full: translatedHero },
+    lang: targetLangCode,
+    uid: user.uid,
+    createdAt: Date.now(),
+    published: false,
   };
   delete newPage.id;
   return newPage;
@@ -125,6 +113,7 @@ Vrať přesně stejnou strukturu JSON s přeloženými hodnotami.`;
 export default function Pages() {
   const { user }  = useAuthState();
   const navigate  = useNavigate();
+  const isMobile  = useIsMobile();
   const [pages,   setPages]   = useState([]);
   const [folders, setFolders] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -150,9 +139,7 @@ export default function Pages() {
             getDocs(query(collection(db, "conversions"), where("pageId", "==", p.id))),
           ]);
           return { ...p, visits: vSnap.size, conversions: cSnap.size };
-        } catch {
-          return { ...p, visits: 0, conversions: 0 };
-        }
+        } catch { return { ...p, visits: 0, conversions: 0 }; }
       }));
       setPages(withStats);
       setFolders(folderList);
@@ -161,21 +148,18 @@ export default function Pages() {
     fetchAll();
   }, [user]);
 
-  // ── SLOŽKY ──────────────────────────────────────────────────────────────────
   async function createFolder(name, color) {
     const ref = await addDoc(collection(db, "folders"), { uid: user.uid, name, color, createdAt: Date.now() });
     setFolders(f => [...f, { id: ref.id, uid: user.uid, name, color }]);
     setOpenFolders(o => ({ ...o, [ref.id]: true }));
   }
-
   async function updateFolder(id, name, color) {
     await updateDoc(doc(db, "folders", id), { name, color });
     setFolders(f => f.map(x => x.id === id ? { ...x, name, color } : x));
   }
-
-  async function deleteFolder(id, deletePages) {
+  async function deleteFolder(id, del) {
     await deleteDoc(doc(db, "folders", id));
-    if (deletePages) {
+    if (del) {
       await Promise.all(pages.filter(p => p.folderId === id).map(p => deleteDoc(doc(db, "pages", p.id))));
       setPages(p => p.filter(x => x.folderId !== id));
     } else {
@@ -186,100 +170,66 @@ export default function Pages() {
     setModal(null);
   }
 
-  // ── AI PŘEKLAD SLOŽKY ───────────────────────────────────────────────────────
-  function openFolderTranslate(folder) {
-    setModal({ type: "translateFolder", folder });
-  }
+  function openFolderTranslate(folder) { setModal({ type:"translateFolder", folder }); }
 
   async function runFolderTranslate(folder, targetLangCode) {
     setModal(null);
     const folderPages = pages.filter(p => p.folderId === folder.id);
-    if (folderPages.length === 0) return;
-
+    if (!folderPages.length) return;
     const lang = LANGUAGES.find(l => l.code === targetLangCode);
     const newFolderRef = await addDoc(collection(db, "folders"), {
-      uid: user.uid,
-      name: `${folder.name} (${lang.flag} ${lang.name})`,
-      color: folder.color,
-      createdAt: Date.now(),
+      uid: user.uid, name: `${folder.name} (${lang.flag} ${lang.name})`, color: folder.color, createdAt: Date.now(),
     });
-    const newFolder = { id: newFolderRef.id, uid: user.uid, name: `${folder.name} (${lang.flag} ${lang.name})`, color: folder.color };
-    setFolders(f => [...f, newFolder]);
+    setFolders(f => [...f, { id: newFolderRef.id, uid: user.uid, name: `${folder.name} (${lang.flag} ${lang.name})`, color: folder.color }]);
     setOpenFolders(o => ({ ...o, [newFolderRef.id]: true }));
 
     for (let i = 0; i < folderPages.length; i++) {
       const page = folderPages[i];
-      setTranslateState({
-        folderId: newFolderRef.id,
-        progress: { done: i, total: folderPages.length, current: page.name || "Stránka" }
-      });
+      setTranslateState({ folderId: newFolderRef.id, progress: { done: i, total: folderPages.length, current: page.name || "Stránka" } });
       try {
         const translated = await translatePage(page, targetLangCode, user);
         translated.folderId = newFolderRef.id;
         const ref = await addDoc(collection(db, "pages"), translated);
         setPages(p => [...p, { id: ref.id, ...translated, visits: 0, conversions: 0 }]);
       } catch (err) {
-        console.error(`Chyba překladu stránky ${page.name}:`, err);
-        setTranslateState(s => ({ ...s, error: `Chyba u stránky "${page.name}"` }));
+        setTranslateState(s => ({ ...s, error: `Chyba u „${page.name}"` }));
       }
     }
-
-    setTranslateState({
-      folderId: newFolderRef.id,
-      progress: { done: folderPages.length, total: folderPages.length, current: null },
-      done: true,
-    });
+    setTranslateState({ folderId: newFolderRef.id, progress: { done: folderPages.length, total: folderPages.length }, done: true });
     setTimeout(() => setTranslateState(null), 3000);
   }
 
-  // ── STRÁNKY ──────────────────────────────────────────────────────────────────
   async function createPage(folderId = null) {
     const ref = await addDoc(collection(db, "pages"), {
-      uid: user.uid, folderId, name: "Nová stránka", headline: "",
-      subline: "", text: "", image: "", video: "", btnText: "", btnUrl: "",
-      price: "", createdAt: Date.now(),
+      uid: user.uid, folderId, name: "Nová stránka", headline: "", subline: "", text: "",
+      image: "", video: "", btnText: "", btnUrl: "", price: "", createdAt: Date.now(),
     });
     navigate(`/editor/${ref.id}`);
   }
-
   async function deletePage(id) {
-    if (!confirm("Opravdu smazat tuto stránku?")) return;
+    if (!confirm("Opravdu smazat?")) return;
     await deleteDoc(doc(db, "pages", id));
     setPages(p => p.filter(x => x.id !== id));
   }
-
   async function publishPage(id) {
     await updateDoc(doc(db, "pages", id), { published: true, publishedAt: Date.now() });
     setPages(p => p.map(x => x.id === id ? { ...x, published: true, publishedAt: Date.now() } : x));
   }
-
   async function publishFolder(folderId) {
-    const fps = pages.filter(p => p.folderId === folderId);
     const now = Date.now();
-    await Promise.all(fps.map(p => updateDoc(doc(db, "pages", p.id), { published: true, publishedAt: now })));
+    await Promise.all(pages.filter(p => p.folderId === folderId).map(p => updateDoc(doc(db, "pages", p.id), { published: true, publishedAt: now })));
     setPages(p => p.map(x => x.folderId === folderId ? { ...x, published: true, publishedAt: now } : x));
   }
-
   async function movePage(pageId, folderId) {
     await updateDoc(doc(db, "pages", pageId), { folderId: folderId || null });
     setPages(p => p.map(x => x.id === pageId ? { ...x, folderId: folderId || null } : x));
-    setModal(null);
   }
 
-  // ── DRAG & DROP ──────────────────────────────────────────────────────────────
   function onDragStart(pageId) { dragPageId.current = pageId; }
-  function onDragOver(e, folderId) {
-    e.preventDefault(); setDragOver(folderId);
-    if (folderId) setOpenFolders(o => ({ ...o, [folderId]: true }));
-  }
-  function onDrop(e, folderId) {
-    e.preventDefault();
-    if (dragPageId.current) movePage(dragPageId.current, folderId);
-    dragPageId.current = null; setDragOver(null);
-  }
+  function onDragOver(e, folderId) { e.preventDefault(); setDragOver(folderId); if (folderId) setOpenFolders(o => ({ ...o, [folderId]: true })); }
+  function onDrop(e, folderId) { e.preventDefault(); if (dragPageId.current) movePage(dragPageId.current, folderId); dragPageId.current = null; setDragOver(null); }
   function onDragEnd() { dragPageId.current = null; setDragOver(null); }
 
-  // ── HELPERS ──────────────────────────────────────────────────────────────────
   function folderStats(folderId) {
     const fp = pages.filter(p => p.folderId === folderId);
     const visits = fp.reduce((s, p) => s + (p.visits || 0), 0);
@@ -294,16 +244,15 @@ export default function Pages() {
     <div style={{ fontFamily:"var(--font-sans,'Inter',sans-serif)", color:"var(--text)" }}>
 
       {/* Hlavička */}
-      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:"24px" }}>
-        <div style={{ display:"flex", alignItems:"center", gap:"12px" }}>
-          <button className="btn btn-outline" onClick={() => navigate("/dashboard")}>← Dashboard</button>
-          <h1 style={{ fontSize:"1.4rem", fontWeight:700 }}>Moje stránky</h1>
-        </div>
-        <div style={{ display:"flex", gap:"10px" }}>
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:"20px", gap:"10px", flexWrap:"wrap" }}>
+        <h1 style={{ fontSize: isMobile ? "1.2rem" : "1.4rem", fontWeight:700 }}>Moje stránky</h1>
+        <div style={{ display:"flex", gap:"8px" }}>
           <button className="btn btn-outline" onClick={() => setModal({ type:"newFolder", data:{ name:"", color: COLORS[0] } })}>
-            📁 Nová složka
+            {isMobile ? "📁" : "📁 Nová složka"}
           </button>
-          <button className="btn btn-primary" onClick={() => createPage(null)}>+ Nová stránka</button>
+          <button className="btn btn-primary" onClick={() => createPage(null)}>
+            {isMobile ? "+ Stránka" : "+ Nová stránka"}
+          </button>
         </div>
       </div>
 
@@ -311,119 +260,99 @@ export default function Pages() {
 
       {/* SLOŽKY */}
       {folders.map(folder => {
-        const stats  = folderStats(folder.id);
+        const stats = folderStats(folder.id);
         const isOpen = openFolders[folder.id];
-        const fps    = pages.filter(p => p.folderId === folder.id);
+        const fps = pages.filter(p => p.folderId === folder.id);
         const isDragTarget = dragOver === folder.id;
         const ts = translateState?.folderId === folder.id ? translateState : null;
 
         return (
           <div key={folder.id} className="card"
-            style={{ marginBottom:"12px", padding:0, overflow:"hidden", transition:"box-shadow .15s", borderLeft:`4px solid ${folder.color}`, boxShadow: isDragTarget ? `0 0 0 2px ${folder.color}` : undefined }}
-            onDragOver={e => onDragOver(e, folder.id)}
-            onDrop={e => onDrop(e, folder.id)}
-            onDragLeave={() => setDragOver(null)}
+            style={{ marginBottom:"10px", padding:0, overflow:"hidden", borderLeft:`4px solid ${folder.color}`, boxShadow: isDragTarget ? `0 0 0 2px ${folder.color}` : undefined }}
+            onDragOver={e => onDragOver(e, folder.id)} onDrop={e => onDrop(e, folder.id)} onDragLeave={() => setDragOver(null)}
           >
-            <div
-              onClick={() => setOpenFolders(o => ({ ...o, [folder.id]: !o[folder.id] }))}
-              style={{ display:"flex", alignItems:"center", gap:"12px", padding:"14px 16px", cursor:"pointer", background: isDragTarget ? folder.color + "18" : undefined, transition:"background .15s" }}
+            {/* Záhlaví složky */}
+            <div onClick={() => setOpenFolders(o => ({ ...o, [folder.id]: !o[folder.id] }))}
+              style={{ display:"flex", alignItems:"center", gap:"10px", padding:"12px 14px", cursor:"pointer", background: isDragTarget ? folder.color+"30" : folder.color+"0d" }}
             >
-              <div style={{ width:"14px", height:"14px", borderRadius:"3px", background:folder.color, flexShrink:0 }}/>
-              <span style={{ fontWeight:700, flex:1 }}>{folder.name}</span>
-              <div style={{ display:"flex", gap:"16px", fontSize:".82rem", color:"var(--text-muted)" }}>
-                <span>📄 {stats.count}</span>
-                <span>👁️ {stats.visits}</span>
-                <span>✅ {stats.convs}</span>
-                <span style={{ color: stats.rate > 10 ? "#16a34a" : stats.rate > 5 ? "#d97706" : "var(--text-muted)", fontWeight:600 }}>{stats.rate} %</span>
-              </div>
-              <div style={{ display:"flex", gap:"6px" }} onClick={e => e.stopPropagation()}>
-                <button
-                  className="btn btn-outline"
-                  style={{ padding:"4px 10px", fontSize:".78rem", color:"#059669", borderColor:"#059669", background:"#f0fdf4", display:"flex", alignItems:"center", gap:"4px" }}
-                  title="Publikovat všechny stránky ve složce"
-                  onClick={() => publishFolder(folder.id)}
-                >
-                  🚀 Publikovat vše
-                </button>
-                <button
-                  className="btn btn-outline"
-                  style={{ padding:"4px 10px", fontSize:".78rem", color:"#7c3aed", borderColor:"#7c3aed", background:"#f5f3ff", display:"flex", alignItems:"center", gap:"4px" }}
-                  onClick={() => openFolderTranslate(folder)}
-                >
-                  🌍 Přeložit
-                </button>
-                <button className="btn btn-outline" style={{ padding:"4px 10px", fontSize:".78rem" }}
-                  onClick={() => setModal({ type:"editFolder", data:{ id: folder.id, name: folder.name, color: folder.color } })}>✏️</button>
-                <button className="btn btn-outline" style={{ padding:"4px 10px", fontSize:".78rem" }}
+              <div style={{ width:"12px", height:"12px", borderRadius:"3px", background:folder.color, flexShrink:0 }}/>
+              <span style={{ fontWeight:700, flex:1, fontSize: isMobile ? ".9rem" : "1rem", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{folder.name}</span>
+
+              {/* Statistiky — skryté na malém mobilu */}
+              {!isMobile && (
+                <div style={{ display:"flex", gap:"14px", fontSize:".8rem", color:"var(--text-muted)" }}>
+                  <span>📄 {stats.count}</span>
+                  <span>👁️ {stats.visits}</span>
+                  <span>✅ {stats.convs}</span>
+                  <span style={{ color: stats.rate > 10 ? "#16a34a" : stats.rate > 5 ? "#d97706" : "var(--text-muted)", fontWeight:600 }}>{stats.rate}%</span>
+                </div>
+              )}
+              {isMobile && <span style={{ fontSize:".75rem", color:"var(--text-muted)" }}>📄{stats.count}</span>}
+
+              {/* Akce */}
+              <div style={{ display:"flex", gap:"4px" }} onClick={e => e.stopPropagation()}>
+                {!isMobile && (
+                  <button className="btn btn-outline"
+                    style={{ padding:"3px 8px", fontSize:".75rem", color:"#059669", borderColor:"#059669", background:"#f0fdf4" }}
+                    onClick={() => publishFolder(folder.id)}>🚀</button>
+                )}
+                <button className="btn btn-outline"
+                  style={{ padding:"3px 8px", fontSize:".75rem", color:"#7c3aed", borderColor:"#7c3aed", background:"#f5f3ff" }}
+                  onClick={() => openFolderTranslate(folder)}>🌍</button>
+                <button className="btn btn-outline" style={{ padding:"3px 8px", fontSize:".75rem" }}
+                  onClick={() => setModal({ type:"editFolder", data:{ id:folder.id, name:folder.name, color:folder.color } })}>✏️</button>
+                <button className="btn btn-outline" style={{ padding:"3px 8px", fontSize:".75rem" }}
                   onClick={() => createPage(folder.id)}>+</button>
-                <button className="btn btn-outline" style={{ padding:"4px 10px", fontSize:".78rem" }}
+                <button className="btn btn-outline" style={{ padding:"3px 8px", fontSize:".75rem" }}
                   onClick={() => setModal({ type:"deleteFolder", folder })}>🗑️</button>
               </div>
             </div>
 
-            {/* Progress bar překladu */}
+            {/* Progress překladu */}
             {ts && (
-              <div style={{ padding:"10px 16px", background:"#f5f3ff", borderTop:"1px solid #ede9fe" }}>
-                <div style={{ display:"flex", alignItems:"center", gap:"10px", marginBottom:"6px" }}>
-                  <span style={{ fontSize:".82rem", fontWeight:600, color:"#7c3aed" }}>
-                    {ts.done ? "✅ Překlad dokončen!" : `🌍 Překládám… ${ts.progress.done}/${ts.progress.total}`}
-                  </span>
-                  {!ts.done && ts.progress.current && (
-                    <span style={{ fontSize:".78rem", color:"#9ca3af" }}>„{ts.progress.current}"</span>
-                  )}
+              <div style={{ padding:"8px 14px", background:"#f5f3ff", borderTop:"1px solid #ede9fe" }}>
+                <div style={{ fontSize:".8rem", fontWeight:600, color:"#7c3aed", marginBottom:"5px" }}>
+                  {ts.done ? "✅ Překlad dokončen!" : `🌍 Překládám… ${ts.progress.done}/${ts.progress.total}`}
+                  {!ts.done && ts.progress.current && <span style={{ fontWeight:400, color:"#9ca3af", marginLeft:"6px" }}>„{ts.progress.current}"</span>}
                 </div>
-                <div style={{ height:"6px", background:"#ede9fe", borderRadius:"3px", overflow:"hidden" }}>
-                  <div style={{ height:"100%", background:"#7c3aed", borderRadius:"3px", width:`${(ts.progress.done / ts.progress.total) * 100}%`, transition:"width .4s" }} />
+                <div style={{ height:"5px", background:"#ede9fe", borderRadius:"3px", overflow:"hidden" }}>
+                  <div style={{ height:"100%", background:"#7c3aed", width:`${(ts.progress.done/ts.progress.total)*100}%`, transition:"width .4s" }}/>
                 </div>
-                {ts.error && <p style={{ fontSize:".78rem", color:"#dc2626", marginTop:"4px" }}>{ts.error}</p>}
+                {ts.error && <p style={{ fontSize:".75rem", color:"#dc2626", marginTop:"4px" }}>{ts.error}</p>}
               </div>
             )}
 
-            {/* Stránky ve složce */}
+            {/* Stránky */}
             {isOpen && (
               <div style={{ borderTop:"1px solid var(--border)" }}>
                 {fps.length === 0 && (
-                  <p style={{ padding:"16px", color:"var(--text-muted)", fontSize:".9rem" }}>
-                    {isDragTarget ? "⬇️ Pusť sem pro přesunutí" : "Složka je prázdná — přetáhni sem stránku nebo klikni +"}
+                  <p style={{ padding:"14px", color:"var(--text-muted)", fontSize:".85rem" }}>
+                    {isDragTarget ? "⬇️ Pusť sem" : "Složka je prázdná — přetáhni stránku nebo klikni +"}
                   </p>
                 )}
                 {fps.map(page => (
-                  <PageRow key={page.id} page={page} navigate={navigate}
-                    onDelete={deletePage}
-                    onPublish={publishPage}
-                    onDragStart={() => onDragStart(page.id)}
-                    onDragEnd={onDragEnd}
+                  <PageRow key={page.id} page={page} navigate={navigate} isMobile={isMobile}
+                    onDelete={deletePage} onPublish={publishPage}
+                    onDragStart={() => onDragStart(page.id)} onDragEnd={onDragEnd}
                   />
                 ))}
-              </div>
-            )}
-
-            {!isOpen && isDragTarget && (
-              <div style={{ padding:"12px 16px", color: folder.color, fontSize:".85rem", fontWeight:600, borderTop:`1px solid ${folder.color}40` }}>
-                ⬇️ Pusť pro přesunutí do složky
               </div>
             )}
           </div>
         );
       })}
 
-      {/* STRÁNKY BEZ SLOŽKY */}
+      {/* BEZ SLOŽKY */}
       {unfoldered.length > 0 && (
-        <div className="card"
-          style={{ padding:0, overflow:"hidden", boxShadow: dragOver === "none" ? "0 0 0 2px #64748b" : undefined }}
-          onDragOver={e => onDragOver(e, "none")}
-          onDrop={e => onDrop(e, null)}
-          onDragLeave={() => setDragOver(null)}
-        >
-          <div style={{ padding:"12px 16px", borderBottom:"1px solid var(--border)", fontWeight:600, color:"var(--text-muted)", fontSize:".85rem", background: dragOver === "none" ? "rgba(100,116,139,.1)" : undefined }}>
-            BEZ SLOŽKY {dragOver === "none" && "⬇️ Pusť sem"}
+        <div className="card" style={{ padding:0, overflow:"hidden", boxShadow: dragOver==="none" ? "0 0 0 2px #64748b" : undefined }}
+          onDragOver={e => onDragOver(e, "none")} onDrop={e => onDrop(e, null)} onDragLeave={() => setDragOver(null)}>
+          <div style={{ padding:"10px 14px", borderBottom:"1px solid var(--border)", fontWeight:600, color:"var(--text-muted)", fontSize:".82rem" }}>
+            BEZ SLOŽKY {dragOver==="none" && "⬇️"}
           </div>
           {unfoldered.map(page => (
-            <PageRow key={page.id} page={page} navigate={navigate}
-              onDelete={deletePage}
-              onPublish={publishPage}
-              onDragStart={() => onDragStart(page.id)}
-              onDragEnd={onDragEnd}
+            <PageRow key={page.id} page={page} navigate={navigate} isMobile={isMobile}
+              onDelete={deletePage} onPublish={publishPage}
+              onDragStart={() => onDragStart(page.id)} onDragEnd={onDragEnd}
             />
           ))}
         </div>
@@ -431,7 +360,7 @@ export default function Pages() {
 
       {/* Prázdný stav */}
       {!loading && pages.length === 0 && folders.length === 0 && (
-        <div className="card" style={{ textAlign:"center", padding:"64px 24px" }}>
+        <div className="card" style={{ textAlign:"center", padding:"48px 24px" }}>
           <div style={{ fontSize:"3rem", marginBottom:"16px" }}>📄</div>
           <h3 style={{ marginBottom:"8px" }}>Zatím nemáš žádné stránky</h3>
           <p style={{ color:"var(--text-muted)", marginBottom:"24px" }}>Vytvoř složku nebo rovnou první stránku.</p>
@@ -451,51 +380,99 @@ export default function Pages() {
           onClose={() => setModal(null)} />
       )}
       {modal?.type === "deleteFolder" && (
-        <DeleteFolderModal
-          folder={modal.folder}
+        <DeleteFolderModal folder={modal.folder}
           pageCount={pages.filter(p => p.folderId === modal.folder.id).length}
-          onConfirm={(del) => deleteFolder(modal.folder.id, del)}
-          onClose={() => setModal(null)}
-        />
+          onConfirm={del => deleteFolder(modal.folder.id, del)}
+          onClose={() => setModal(null)} />
       )}
       {modal?.type === "translateFolder" && (
-        <TranslateFolderModal
-          folder={modal.folder}
+        <TranslateFolderModal folder={modal.folder}
           pageCount={pages.filter(p => p.folderId === modal.folder.id).length}
-          onTranslate={(langCode) => runFolderTranslate(modal.folder, langCode)}
-          onClose={() => setModal(null)}
-        />
+          onTranslate={langCode => runFolderTranslate(modal.folder, langCode)}
+          onClose={() => setModal(null)} />
       )}
     </div>
   );
 }
 
-// ─── Modal: smazání složky ────────────────────────────────────────────────────
+// ─── PageRow ──────────────────────────────────────────────────────────────────
+function PageRow({ page, navigate, onDelete, onDragStart, onDragEnd, onPublish, isMobile }) {
+  const rate = page.visits > 0 ? Math.round((page.conversions / page.visits) * 100) : 0;
+  const isPublished = !!page.published;
+  const hasChanges  = page.updatedAt && page.publishedAt && page.updatedAt > page.publishedAt;
+
+  return (
+    <div draggable onDragStart={onDragStart} onDragEnd={onDragEnd}
+      style={{ display:"flex", alignItems:"center", gap:"8px", padding:"10px 14px", borderBottom:"1px solid var(--border)", cursor:"grab" }}
+      onMouseEnter={e => e.currentTarget.style.background = "var(--bg)"}
+      onMouseLeave={e => e.currentTarget.style.background = "transparent"}
+    >
+      {!isMobile && <span style={{ fontSize:".85rem", color:"var(--text-muted)" }}>⠿</span>}
+      {page.lang && <span style={{ fontSize:"1rem" }}>{LANG_FLAGS[page.lang] || "🌐"}</span>}
+
+      {/* Název */}
+      <div style={{ flex:1, minWidth:0, cursor:"pointer" }} onClick={() => navigate(`/editor/${page.id}`)}>
+        <div style={{ fontWeight:600, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", fontSize: isMobile ? ".85rem" : ".9rem" }}
+          onMouseEnter={e => e.currentTarget.style.color = "#7c3aed"}
+          onMouseLeave={e => e.currentTarget.style.color = "var(--text)"}>
+          {page.name || "Bez názvu"}
+          {!isPublished && <span style={{ marginLeft:"5px", fontSize:"9px", fontWeight:700, padding:"1px 5px", borderRadius:"6px", background:"#fef9c3", color:"#854d0e" }}>Nepublikováno</span>}
+          {isPublished && hasChanges && <span style={{ marginLeft:"5px", fontSize:"9px", fontWeight:700, padding:"1px 5px", borderRadius:"6px", background:"#fff7ed", color:"#c2410c" }}>Změny</span>}
+        </div>
+        {!isMobile && <div style={{ fontSize:".75rem", color:"var(--text-muted)", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{page.headline || "—"}</div>}
+      </div>
+
+      {/* Statistiky — jen desktop */}
+      {!isMobile && (
+        <div style={{ display:"flex", gap:"14px", fontSize:".8rem", color:"var(--text-muted)" }}>
+          <span>👁️ {page.visits || 0}</span>
+          <span>✅ {page.conversions || 0}</span>
+          <span style={{ color: rate > 10 ? "#16a34a" : rate > 5 ? "#d97706" : "var(--text-muted)", fontWeight:600 }}>{rate}%</span>
+        </div>
+      )}
+
+      {/* Akce */}
+      <div style={{ display:"flex", gap:"5px", flexShrink:0 }}>
+        {isPublished && !hasChanges ? (
+          <button className="btn btn-outline" style={{ padding:"4px 10px", fontSize:".78rem" }}
+            onClick={() => window.open(`/p/${page.id}`, "_blank")}>
+            {isMobile ? "👁️" : "👁️ Náhled"}
+          </button>
+        ) : (
+          <button style={{ padding:"4px 10px", fontSize:".78rem", fontWeight:700, border:"none", borderRadius:"7px", cursor:"pointer", background: isPublished ? "#f97316" : "#7c3aed", color:"#fff" }}
+            onClick={() => onPublish(page.id)}>
+            {isMobile ? "🚀" : isPublished ? "🚀 Zveřejnit" : "🚀 Publikovat"}
+          </button>
+        )}
+        <button className="btn btn-outline" style={{ padding:"4px 8px", fontSize:".78rem" }}
+          onClick={() => onDelete(page.id)}>🗑️</button>
+      </div>
+    </div>
+  );
+}
+
+// ─── DeleteFolderModal ────────────────────────────────────────────────────────
 function DeleteFolderModal({ folder, pageCount, onConfirm, onClose }) {
   return (
     <ModalWrap onClose={onClose}>
       <h3 style={{ marginBottom:"8px", fontWeight:700 }}>🗑️ Smazat složku</h3>
       <p style={{ fontSize:".88rem", color:"var(--text-muted)", marginBottom:"20px" }}>
-        Složka <strong>„{folder.name}"</strong> obsahuje <strong>{pageCount}</strong> {pageCount === 1 ? "stránku" : pageCount < 5 ? "stránky" : "stránek"}. Co chceš udělat se stránkami uvnitř?
+        Složka <strong>„{folder.name}"</strong> obsahuje <strong>{pageCount}</strong> {pageCount === 1 ? "stránku" : pageCount < 5 ? "stránky" : "stránek"}. Co chceš udělat se stránkami?
       </p>
       <div style={{ display:"flex", flexDirection:"column", gap:"10px", marginBottom:"20px" }}>
-        <button
-          onClick={() => onConfirm(false)}
+        <button onClick={() => onConfirm(false)}
           style={{ padding:"12px 16px", borderRadius:"10px", border:"1px solid var(--border)", background:"var(--bg-card)", cursor:"pointer", textAlign:"left", fontSize:".88rem" }}
           onMouseEnter={e => e.currentTarget.style.borderColor = "#7c3aed"}
-          onMouseLeave={e => e.currentTarget.style.borderColor = "var(--border)"}
-        >
+          onMouseLeave={e => e.currentTarget.style.borderColor = "var(--border)"}>
           <div style={{ fontWeight:600, marginBottom:"3px" }}>📁 Smazat pouze složku</div>
-          <div style={{ fontSize:".8rem", color:"var(--text-muted)" }}>Stránky zůstanou — přesunou se do sekce „Bez složky"</div>
+          <div style={{ fontSize:".8rem", color:"var(--text-muted)" }}>Stránky přesunou se do „Bez složky"</div>
         </button>
-        <button
-          onClick={() => onConfirm(true)}
+        <button onClick={() => onConfirm(true)}
           style={{ padding:"12px 16px", borderRadius:"10px", border:"1px solid #fca5a5", background:"#fff1f2", cursor:"pointer", textAlign:"left", fontSize:".88rem" }}
           onMouseEnter={e => e.currentTarget.style.background = "#fee2e2"}
-          onMouseLeave={e => e.currentTarget.style.background = "#fff1f2"}
-        >
-          <div style={{ fontWeight:600, color:"#dc2626", marginBottom:"3px" }}>🗑️ Smazat složku i všechny stránky</div>
-          <div style={{ fontSize:".8rem", color:"#ef4444" }}>Nevratná akce — smaže {pageCount} {pageCount === 1 ? "stránku" : pageCount < 5 ? "stránky" : "stránek"}</div>
+          onMouseLeave={e => e.currentTarget.style.background = "#fff1f2"}>
+          <div style={{ fontWeight:600, color:"#dc2626", marginBottom:"3px" }}>🗑️ Smazat vše</div>
+          <div style={{ fontSize:".8rem", color:"#ef4444" }}>Nevratná akce — smaže {pageCount} {pageCount === 1 ? "stránku" : "stránek"}</div>
         </button>
       </div>
       <div style={{ display:"flex", justifyContent:"flex-end" }}>
@@ -505,94 +482,36 @@ function DeleteFolderModal({ folder, pageCount, onConfirm, onClose }) {
   );
 }
 
-// ─── Modal: výběr jazyka pro překlad složky ───────────────────────────────────
+// ─── TranslateFolderModal ─────────────────────────────────────────────────────
 function TranslateFolderModal({ folder, pageCount, onTranslate, onClose }) {
   const [selected, setSelected] = useState(null);
-
   return (
     <ModalWrap onClose={onClose}>
       <h3 style={{ marginBottom:"6px", fontWeight:700 }}>🌍 Přeložit složku</h3>
-      <p style={{ fontSize:".88rem", color:"var(--text-muted)", marginBottom:"6px" }}>
-        AI zkopíruje složku <strong>„{folder.name}"</strong> ({pageCount} {pageCount === 1 ? "stránka" : pageCount < 5 ? "stránky" : "stránek"}) a přeloží vše do zvoleného jazyka.
+      <p style={{ fontSize:".85rem", color:"var(--text-muted)", marginBottom:"6px" }}>
+        Přeloží <strong>{pageCount}</strong> stránek včetně Hero sekce, formuláře i tlačítek.
       </p>
-      <p style={{ fontSize:".8rem", color:"#7c3aed", marginBottom:"16px", background:"#f5f3ff", padding:"6px 10px", borderRadius:"6px" }}>
-        ✅ Překládá se: název, nadpisy, obsah, Hero sekce, formulář i tlačítka
-      </p>
-      <label style={{ fontSize:".78rem", fontWeight:600, color:"var(--text-muted)", display:"block", marginBottom:"8px" }}>CÍLOVÝ JAZYK</label>
-      <div style={{ display:"flex", flexWrap:"wrap", gap:"6px", marginBottom:"20px", maxHeight:"200px", overflowY:"auto" }}>
+      <div style={{ display:"flex", flexWrap:"wrap", gap:"6px", marginBottom:"16px", maxHeight:"200px", overflowY:"auto" }}>
         {LANGUAGES.map(lang => (
           <button key={lang.code} onClick={() => setSelected(lang.code)}
             style={{ padding:"6px 12px", borderRadius:"8px", fontSize:".85rem", cursor:"pointer",
-              border: selected === lang.code ? "2px solid #7c3aed" : "1px solid var(--border)",
-              background: selected === lang.code ? "#f5f3ff" : "var(--bg-card)",
-              color: selected === lang.code ? "#7c3aed" : "var(--text)",
-              fontWeight: selected === lang.code ? 600 : 400 }}>
+              border: selected===lang.code ? "2px solid #7c3aed" : "1px solid var(--border)",
+              background: selected===lang.code ? "#f5f3ff" : "var(--bg-card)",
+              color: selected===lang.code ? "#7c3aed" : "var(--text)",
+              fontWeight: selected===lang.code ? 600 : 400 }}>
             {lang.flag} {lang.name}
           </button>
         ))}
       </div>
-      {selected && (
-        <div style={{ background:"#f0fdf4", border:"1px solid #bbf7d0", borderRadius:"8px", padding:"10px 14px", marginBottom:"16px", fontSize:".82rem", color:"#166534" }}>
-          ✅ Vytvoří se nová složka <strong>„{folder.name} ({LANGUAGES.find(l=>l.code===selected)?.flag} {LANGUAGES.find(l=>l.code===selected)?.name})"</strong>. Originál zůstane nedotčen.
-        </div>
-      )}
       <div style={{ display:"flex", gap:"10px", justifyContent:"flex-end" }}>
         <button className="btn btn-outline" onClick={onClose}>Zrušit</button>
         <button className="btn btn-primary" disabled={!selected}
           onClick={() => selected && onTranslate(selected)}
-          style={{ opacity: selected ? 1 : 0.5, cursor: selected ? "pointer" : "not-allowed" }}>
-          🌍 Spustit překlad
+          style={{ opacity: selected ? 1 : 0.5 }}>
+          🌍 Přeložit
         </button>
       </div>
     </ModalWrap>
-  );
-}
-
-// ─── PageRow ──────────────────────────────────────────────────────────────────
-function PageRow({ page, navigate, onDelete, onDragStart, onDragEnd, onPublish }) {
-  const rate = page.visits > 0 ? Math.round((page.conversions / page.visits) * 100) : 0;
-  const isPublished = !!page.published;
-  const hasChanges  = page.updatedAt && page.publishedAt && page.updatedAt > page.publishedAt;
-
-  return (
-    <div draggable onDragStart={onDragStart} onDragEnd={onDragEnd}
-      style={{ display:"flex", alignItems:"center", gap:"12px", padding:"12px 16px", borderBottom:"1px solid var(--border)", cursor:"grab", transition:"background .15s" }}
-      onMouseEnter={e => e.currentTarget.style.background = "var(--bg)"}
-      onMouseLeave={e => e.currentTarget.style.background = "transparent"}
-    >
-      <span style={{ fontSize:".9rem", color:"var(--text-muted)", cursor:"grab" }}>⠿</span>
-      <span style={{ fontSize:"1rem" }}>📄</span>
-      {page.lang && <span style={{ fontSize:"1.1rem" }} title={page.lang}>{LANG_FLAGS[page.lang] || "🌐"}</span>}
-      <div style={{ flex:1, minWidth:0, cursor:"pointer" }} onClick={() => navigate(`/editor/${page.id}`)}>
-        <div style={{ fontWeight:600, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", color:"var(--text)" }}
-          onMouseEnter={e => e.currentTarget.style.color = "#7c3aed"}
-          onMouseLeave={e => e.currentTarget.style.color = "var(--text)"}>
-          {page.name || "Bez názvu"}
-          {!isPublished && <span style={{ marginLeft:"6px", fontSize:"10px", fontWeight:700, padding:"1px 6px", borderRadius:"8px", background:"#fef9c3", color:"#854d0e" }}>Nepublikováno</span>}
-          {isPublished && hasChanges && <span style={{ marginLeft:"6px", fontSize:"10px", fontWeight:700, padding:"1px 6px", borderRadius:"8px", background:"#fff7ed", color:"#c2410c" }}>Nezveřejněné změny</span>}
-        </div>
-        <div style={{ fontSize:".8rem", color:"var(--text-muted)" }}>{page.headline || "—"}</div>
-      </div>
-      <div style={{ display:"flex", gap:"20px", fontSize:".85rem", color:"var(--text-muted)" }}>
-        <span>👁️ {page.visits || 0}</span>
-        <span>✅ {page.conversions || 0}</span>
-        <span style={{ color: rate > 10 ? "#16a34a" : rate > 5 ? "#d97706" : "var(--text-muted)", fontWeight:600 }}>{rate} %</span>
-      </div>
-      <div style={{ display:"flex", gap:"6px" }}>
-        {isPublished && !hasChanges ? (
-          <button className="btn btn-outline" style={{ padding:"5px 12px", fontSize:".8rem" }}
-            onClick={() => window.open(`/p/${page.id}`, "_blank")}>👁️ Náhled</button>
-        ) : (
-          <button
-            style={{ padding:"5px 12px", fontSize:".8rem", fontWeight:700, border:"none", borderRadius:"7px", cursor:"pointer", background: isPublished ? "#f97316" : "#7c3aed", color:"#fff", display:"flex", alignItems:"center", gap:"4px" }}
-            onClick={() => onPublish(page.id)}>
-            🚀 {isPublished ? "Zveřejnit změny" : "Publikovat"}
-          </button>
-        )}
-        <button className="btn btn-outline" style={{ padding:"5px 10px", fontSize:".8rem" }}
-          onClick={() => onDelete(page.id)}>🗑️</button>
-      </div>
-    </div>
   );
 }
 
@@ -607,10 +526,10 @@ function FolderModal({ title, data, colors, onSave, onClose }) {
       <input value={name} onChange={e => setName(e.target.value)} placeholder="název složky"
         style={{ width:"100%", padding:"10px 12px", border:"1px solid var(--border)", borderRadius:"8px", background:"var(--input-bg)", color:"var(--text)", fontSize:".95rem", marginBottom:"16px", outline:"none" }} />
       <label style={{ fontSize:".8rem", fontWeight:600, color:"var(--text-muted)", display:"block", marginBottom:"8px" }}>BARVA</label>
-      <div style={{ display:"flex", gap:"8px", marginBottom:"24px" }}>
+      <div style={{ display:"flex", gap:"8px", flexWrap:"wrap", marginBottom:"24px" }}>
         {colors.map(c => (
           <div key={c} onClick={() => setColor(c)}
-            style={{ width:"28px", height:"28px", borderRadius:"50%", background:c, cursor:"pointer", border: color === c ? "3px solid var(--text)" : "3px solid transparent", transition:"border .15s" }} />
+            style={{ width:"28px", height:"28px", borderRadius:"50%", background:c, cursor:"pointer", border: color===c ? "3px solid var(--text)" : "3px solid transparent" }} />
         ))}
       </div>
       <div style={{ display:"flex", gap:"10px", justifyContent:"flex-end" }}>
@@ -624,8 +543,8 @@ function FolderModal({ title, data, colors, onSave, onClose }) {
 // ─── ModalWrap ────────────────────────────────────────────────────────────────
 function ModalWrap({ children, onClose }) {
   return (
-    <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,.4)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:1000 }} onClick={onClose}>
-      <div style={{ background:"var(--bg-card)", borderRadius:"16px", padding:"28px", minWidth:"400px", maxWidth:"520px", boxShadow:"0 8px 32px rgba(0,0,0,.2)" }} onClick={e => e.stopPropagation()}>
+    <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,.4)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:1000, padding:"16px" }} onClick={onClose}>
+      <div style={{ background:"var(--bg-card)", borderRadius:"16px", padding:"24px", width:"100%", maxWidth:"480px", boxShadow:"0 8px 32px rgba(0,0,0,.2)" }} onClick={e => e.stopPropagation()}>
         {children}
       </div>
     </div>
