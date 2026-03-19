@@ -37,9 +37,6 @@ const EMOJIS = ["😀","😂","😍","🔥","💪","✅","❤️","🎉","🚀",
 const PUBLIC_BASE_URL = `${window.location.origin}/p/`;
 
 const DEVICES = [
-  { key:"full",          label:"💻 Desktop",       mockup:false },
-  { key:"tablet",        label:"📱 Tablet",         mockup:false },
-  { key:"mobile",        label:"📲 Mobil",          mockup:false },
   { key:"mockup-mobile", label:"📱 Mockup mobil",   mockup:true  },
   { key:"mockup-tablet", label:"🖥 Mockup tablet",  mockup:true  },
   { key:"mockup-laptop", label:"💻 Mockup laptop",  mockup:true  },
@@ -503,7 +500,7 @@ export default function PageEditor() {
   const [loading, setLoading] = useState(true);
   const [toast,   setToast]   = useState("");
   const [activeTab, setActiveTab] = useState(0);
-  const [devMode,   setDevMode]   = useState("full");
+  const [devMode, setDevMode] = useState("mockup-laptop");
   const [htmlEditorOpen, setHtmlEditorOpen] = useState(false);
 
   const [heroes, setHeroes] = useState({ full: DEFAULT_HERO });
@@ -513,7 +510,10 @@ export default function PageEditor() {
   const [editorKey,         setEditorKey]         = useState(0);
   const [editorInitialHtml, setEditorInitialHtml] = useState("");
   const [showTranslatePicker, setShowTranslatePicker] = useState(false);
-  const [showAIGen,    setShowAIGen]    = useState(false);
+  const [editingName,    setEditingName]    = useState(false);
+  const [showAIGen,      setShowAIGen]      = useState(false);
+  const [showPageFields, setShowPageFields] = useState(false);
+  const nameInputRef = useRef(null);
   const [aiEditInput,   setAiEditInput]   = useState("");
   const [aiEditLoading, setAiEditLoading] = useState(false);
   const [mediaBlocks,   setMediaBlocks]   = useState([]);
@@ -682,7 +682,27 @@ export default function PageEditor() {
           {/* Topbar */}
           <div style={{ padding:"10px 14px", borderBottom:"1px solid var(--border)", display:"flex", alignItems:"center", gap:"7px", flexShrink:0 }}>
             <button style={S.btnOut} onClick={() => navigate("/pages")}>← Zpět</button>
-            <span style={{ fontWeight:700, flex:1, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", fontSize:".92rem" }}>{page.name || "Editor"}</span>
+            {editingName ? (
+              <input
+                ref={nameInputRef}
+                value={page.name || ""}
+                onChange={e => update("name", e.target.value)}
+                onBlur={() => setEditingName(false)}
+                onKeyDown={e => e.key === "Enter" && setEditingName(false)}
+                autoFocus
+                style={{ fontWeight:700, flex:1, fontSize:".92rem", border:"none", borderBottom:"2px solid #7c3aed", outline:"none", background:"transparent", color:"var(--text)", padding:"2px 4px" }}
+              />
+            ) : (
+              <span
+                onClick={() => setEditingName(true)}
+                title="Klikni pro přejmenování"
+                style={{ fontWeight:700, flex:1, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", fontSize:".92rem", cursor:"text", borderBottom:"2px solid transparent", padding:"2px 4px" }}
+                onMouseEnter={e => e.currentTarget.style.borderBottomColor = "#c4b5fd"}
+                onMouseLeave={e => e.currentTarget.style.borderBottomColor = "transparent"}
+              >
+                {page.name || "Editor"}
+              </span>
+            )}
             <button style={S.btnOut} onClick={handleSave}>Uložit</button>
             <button onClick={handlePublish} disabled={publishing}
               style={{ ...S.btnPrim, background: page.published && !hasUnpublishedChanges ? "#059669" : "#7c3aed", display:"flex", alignItems:"center", gap:"5px", position:"relative" }}>
@@ -703,95 +723,89 @@ export default function PageEditor() {
           )}
 
           {/* Jazyk */}
-          <div style={{ padding:"9px 14px", borderBottom:"1px solid var(--border)", background:"var(--bg)", flexShrink:0 }}>
-            <div style={{ display:"flex", alignItems:"center", gap:"8px" }}>
+          <div style={{ padding:"7px 14px", borderBottom:"1px solid var(--border)", background:"var(--bg)", flexShrink:0 }}>
+            <div style={{ display:"flex", alignItems:"center", gap:"6px" }}>
               <span style={{ fontSize:".72rem", fontWeight:600, color:"var(--text-muted)" }}>JAZYK:</span>
               <select value={page.lang || "cs"} onChange={e => update("lang", e.target.value)}
-                style={{ ...S.input, width:"auto", padding:"4px 8px", fontSize:".85rem" }}>
+                style={{ ...S.input, width:"auto", padding:"3px 6px", fontSize:".8rem" }}>
                 {LANGUAGES.map(l => <option key={l.code} value={l.code}>{l.flag} {l.name}</option>)}
               </select>
-              <button onClick={() => setShowTranslatePicker(v => !v)}
-                style={{ marginLeft:"auto", padding:"5px 11px", fontSize:".8rem", fontWeight:600, border:"1px solid #7c3aed", borderRadius:"8px", background:"#ede9fe", color:"#7c3aed", cursor:"pointer" }}>
-                🌍 Přeložit
-              </button>
             </div>
-            {showTranslatePicker && (
-              <AITranslator
-                page={page}
-                hero={currentHero}
-                currentLang={page?.lang || "cs"}
-                userId={user?.uid}
-                onClose={() => setShowTranslatePicker(false)}
-                onNavigate={id => navigate(`/editor/${id}`)}
-              />
-            )}
           </div>
 
           {/* Záložky */}
           <div style={{ display:"flex", borderBottom:"1px solid var(--border)", flexShrink:0 }}>
-            {["🏠 Hero", "① Obsah", "② Akce"].map((tab, i) => (
+            {[
+              { label:"🏠 Hero",     color:"#7c3aed" },
+              { label:"📝 Obsah",    color:"#0891b2" },
+              { label:"⚙️ Akce",    color:"#16a34a" },
+            ].map((tab, i) => (
               <button key={i} onClick={() => setActiveTab(i)}
-                style={{ flex:1, padding:"9px 2px 8px", fontSize:".72rem", fontWeight:600, border:"none", background:"transparent", cursor:"pointer", color: activeTab === i ? "#7c3aed" : "var(--text-muted)", borderBottom: activeTab === i ? "2px solid #7c3aed" : "2px solid transparent" }}>
-                {tab}
+                style={{ flex:1, padding:"8px 2px 7px", fontSize:".72rem", fontWeight:600, border:"none", background: activeTab===i ? tab.color+"15" : "transparent", cursor:"pointer", color: activeTab===i ? tab.color : "var(--text-muted)", borderBottom: activeTab===i ? `2px solid ${tab.color}` : "2px solid transparent" }}>
+                {tab.label}
               </button>
             ))}
           </div>
 
-          {/* ZÁLOŽKA 0: Hero + AI Generátor */}
+          {/* ZÁLOŽKA 0: Hero */}
           {activeTab === 0 && (
             <div style={{ flex:1, overflowY:"auto", display:"flex", flexDirection:"column" }}>
-              <div style={{ padding:"15px", borderBottom:"1px solid var(--border)" }}>
-
-                {/* ── GLOBÁLNÍ AI GENERÁTOR ── */}
-                {showAIGen && (
-                  <AIPageGenerator
-                    lang={page?.lang || "cs"}
-                    onGenerated={({ page: p, hero: h }) => {
-                      setPage(prev => ({ ...prev, ...p }));
-                      setEditorInitialHtml(p.text || "");
-                      setEditorKey(k => k + 1);
-                      if (h) {
-                        const newHero = {
-                          ...DEFAULT_HERO,
-                          ...h,
-                          showBadge: true,
-                          showH1:    true,
-                          showSub:   true,
-                          btn1:      true,
-                          btn2:      true,
-                        };
-                        setHeroes(prev => ({ ...prev, [devMode]: newHero }));
-                      }
-                      setShowAIGen(false);
-                      showToast("✨ Celá stránka vygenerována!");
-                    }}
-                    onClose={() => setShowAIGen(false)}
-                  />
+              <div style={{ padding:"10px 12px", borderBottom:"1px solid var(--border)" }}>
+                {/* Název + Nadpis + Podnadpis — rozbalovací */}
+                <div
+                  onClick={() => setShowPageFields(v => !v)}
+                  style={{ display:"flex", alignItems:"center", justifyContent:"space-between", cursor:"pointer", marginBottom: showPageFields ? "8px" : 0 }}>
+                  <span style={{ fontSize:".78rem", fontWeight:600, color:"var(--text-muted)" }}>
+                    📄 {page.name || "Název stránky"}
+                  </span>
+                  <span style={{ fontSize:"11px", color:"var(--text-muted)" }}>{showPageFields ? "▲" : "▼"}</span>
+                </div>
+                {showPageFields && (
+                  <div style={{ display:"flex", flexDirection:"column", gap:"4px", marginBottom:"8px" }}>
+                    <input value={page.name || ""} onChange={e => update("name", e.target.value)}
+                      style={{ ...S.input, fontSize:".82rem" }} placeholder="Název stránky"/>
+                    <input value={page.headline || ""} onChange={e => update("headline", e.target.value)}
+                      style={{ ...S.input, fontSize:".82rem" }} placeholder="Nadpis (headline)"/>
+                    <input value={page.subline || ""} onChange={e => update("subline", e.target.value)}
+                      style={{ ...S.input, fontSize:".82rem" }} placeholder="Podnadpis"/>
+                  </div>
                 )}
-
-                <FieldInput label="Název stránky"     value={page.name}     onChange={v => update("name", v)}     placeholder="např. Prodejní stránka" />
-                <FieldInput label="Nadpis (headline)" value={page.headline} onChange={v => update("headline", v)} placeholder="Silný, emocionální nadpis" />
-                <FieldInput label="Podnadpis"         value={page.subline}  onChange={v => update("subline", v)}  placeholder="Krátký podpůrný podnadpis" />
-                <div style={{ display:"flex", gap:"8px", marginTop:"4px" }}>
-                  <button style={{ ...S.btnOut, flex:1 }} onClick={() => setShowTranslatePicker(v => !v)}>🌐 Přeložit</button>                  <button style={{ ...S.btnPrim, flex:2 }} onClick={() => setShowAIGen(v => !v)}>
+                {/* Přeložit + AI generátor */}
+                <div style={{ display:"flex", gap:"6px" }}>
+                  <button onClick={() => setShowTranslatePicker(v => !v)}
+                    style={{ flex:1, padding:"6px 8px", fontSize:".8rem", fontWeight:600, border:"1px solid #7c3aed", borderRadius:"7px", background: showTranslatePicker ? "#7c3aed" : "#ede9fe", color: showTranslatePicker ? "#fff" : "#7c3aed", cursor:"pointer" }}>
+                    🌍 Přeložit
+                  </button>
+                  <button onClick={() => setShowAIGen(v => !v)}
+                    style={{ flex:2, padding:"6px 8px", fontSize:".8rem", fontWeight:700, border:"none", borderRadius:"7px", background:"linear-gradient(90deg,#7c3aed,#a78bfa)", color:"#fff", cursor:"pointer" }}>
                     ✨ AI generátor stránky
                   </button>
                 </div>
-              </div>
-
-              {/* Indikátor zařízení */}
-              <div style={{ padding:"8px 15px", background: hasCustomHero ? "#ede9fe" : "var(--bg)", borderBottom:"1px solid var(--border)", display:"flex", alignItems:"center", gap:"8px", flexShrink:0 }}>
-                <span style={{ fontSize:"11px", fontWeight:600, color: hasCustomHero ? "#7c3aed" : "var(--text-muted)" }}>
-                  {hasCustomHero ? "✏️" : "📋"} Nastavení pro: <strong>{deviceLabel}</strong>
-                </span>
-                {hasCustomHero && (
-                  <button onClick={() => setHeroes(h => { const n = {...h}; delete n[devMode]; return n; })}
-                    style={{ marginLeft:"auto", fontSize:"10px", padding:"2px 8px", border:"1px solid #7c3aed", borderRadius:"5px", background:"transparent", color:"#7c3aed", cursor:"pointer" }}>
-                    ↺ Reset na Desktop
-                  </button>
+                {/* AI/Překlad panely */}
+                {showTranslatePicker && (
+                  <div style={{ marginTop:"8px" }}>
+                    <AITranslator page={page} hero={currentHero} currentLang={page?.lang || "cs"} userId={user?.uid}
+                      onClose={() => setShowTranslatePicker(false)} onNavigate={id => navigate(`/editor/${id}`)}/>
+                  </div>
+                )}
+                {showAIGen && (
+                  <div style={{ marginTop:"8px" }}>
+                    <AIPageGenerator lang={page?.lang || "cs"}
+                      onGenerated={({ page: p, hero: h }) => {
+                        setPage(prev => ({ ...prev, ...p }));
+                        setEditorInitialHtml(p.text || "");
+                        setEditorKey(k => k + 1);
+                        if (h) {
+                          const newHero = { ...DEFAULT_HERO, ...h, showBadge:true, showH1:true, showSub:true, btn1:true, btn2:true };
+                          setHeroes(prev => ({ ...prev, [devMode]: newHero }));
+                        }
+                        setShowAIGen(false);
+                        showToast("✨ Celá stránka vygenerována!");
+                      }}
+                      onClose={() => setShowAIGen(false)}/>
+                  </div>
                 )}
               </div>
-
               <HeroEditor hero={currentHero} onChange={setCurrentHero} userId={user?.uid} />
             </div>
           )}
