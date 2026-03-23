@@ -134,7 +134,7 @@ export default function AIAssistant() {
       <div
         onClick={() => setOpen(v => !v)}
         style={{
-          position: "fixed", top: "16px", right: "16px", zIndex: 9998,
+          position: "fixed", bottom: "16px", right: "16px", zIndex: 9998,
           cursor: "pointer", userSelect: "none",
           display: "flex", flexDirection: "column", alignItems: "center",
           filter: "drop-shadow(0 4px 12px rgba(0,0,0,.25))",
@@ -215,7 +215,7 @@ export default function AIAssistant() {
       {/* ── Chat okno ── */}
       {open && (
         <div style={{
-          position: "fixed", top: "110px", right: "16px", zIndex: 9997,
+          position: "fixed", bottom: "120px", right: "16px", zIndex: 9997,
           width: "340px", maxWidth: "calc(100vw - 48px)",
           background: "var(--bg-card, #fff)",
           border: "1px solid var(--border, #e5e7eb)",
