@@ -363,6 +363,7 @@ function Toast({ msg }) {
 // ─── HeroClickMenu — menu po kliknutí na Hero ─────────────────────────────────
 function HeroClickMenu({ hero, onSelect }) {
   const [open, setOpen] = useState(false);
+  const [flash, setFlash] = useState(null); // label právě kliknuté položky
 
   const items = [
     hero?.showBadge && { field:"badgeText",   icon:"🏷", label:"Badge text" },
@@ -373,8 +374,37 @@ function HeroClickMenu({ hero, onSelect }) {
     { field:"bg",          icon:"🎨", label:"Pozadí & styl" },
   ].filter(Boolean);
 
+  function handleSelect(item) {
+    setOpen(false);
+    setFlash(item.label);
+    setTimeout(() => setFlash(null), 1200);
+    onSelect(item.field);
+  }
+
   return (
     <>
+      {/* Flash overlay — žluté zvýraznění přes hero */}
+      {flash && (
+        <div style={{
+          position:"absolute", inset:0, zIndex:15,
+          background:"rgba(254,240,138,0.35)",
+          border:"2px solid #eab308",
+          borderRadius:"6px",
+          pointerEvents:"none",
+          display:"flex", alignItems:"center", justifyContent:"center",
+          animation:"heroFlash .3s ease",
+        }}>
+          <style>{`@keyframes heroFlash{from{opacity:0}to{opacity:1}}`}</style>
+          <div style={{
+            background:"#eab308", color:"#1a1a1a", fontSize:"12px", fontWeight:700,
+            padding:"5px 14px", borderRadius:"20px",
+            boxShadow:"0 2px 8px rgba(0,0,0,.2)",
+          }}>
+            ✏️ {flash}
+          </div>
+        </div>
+      )}
+
       {/* Průhledný overlay přes celý hero */}
       <div
         onClick={() => setOpen(v => !v)}
@@ -388,8 +418,7 @@ function HeroClickMenu({ hero, onSelect }) {
         onMouseEnter={e => { if (!open) e.currentTarget.style.background = "rgba(124,58,237,0.04)"; }}
         onMouseLeave={e => { if (!open) e.currentTarget.style.background = "transparent"; }}
       >
-        {/* Hint tlačítko */}
-        {!open && (
+        {!open && !flash && (
           <div style={{
             background:"#7c3aed", color:"#fff", fontSize:"11px", fontWeight:700,
             padding:"4px 10px", borderRadius:"20px", display:"flex", alignItems:"center",
@@ -415,7 +444,7 @@ function HeroClickMenu({ hero, onSelect }) {
           </div>
           {items.map(item => (
             <button key={item.field}
-              onClick={() => { onSelect(item.field); setOpen(false); }}
+              onClick={() => handleSelect(item)}
               style={{
                 display:"flex", alignItems:"center", gap:"8px",
                 padding:"8px 10px", border:"none", borderRadius:"8px",
