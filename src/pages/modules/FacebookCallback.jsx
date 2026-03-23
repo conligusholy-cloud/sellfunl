@@ -1,21 +1,36 @@
 import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { httpsCallable } from "firebase/functions";
-import { getFunctions } from "firebase/functions";
+import { httpsCallable, getFunctions } from "firebase/functions";
+import { onAuthStateChanged } from "firebase/auth";
+import { auth } from "../../firebase/config";
 
 const functions = getFunctions();
 
 /**
  * Callback stránka pro Facebook OAuth.
  * Facebook přesměruje sem s ?code=...&state=...
- * Tato stránka vyměnění code za token a zavře okno.
+ * Počká na Firebase Auth init, vyměni code za token a zavře okno.
  */
 export default function FacebookCallback() {
   const [searchParams] = useSearchParams();
-  const [status, setStatus] = useState("loading"); // loading | success | error
+  const [status, setStatus] = useState("loading");
   const [message, setMessage] = useState("Propojuji s Facebookem…");
 
   useEffect(() => {
+    // Počkej na inicializaci Firebase Auth (uživatel může být přihlášený)
+    const unsub = onAuthStateChanged(auth, (user) => {
+      unsub(); // Stačí nám první emise
+
+      if (!user) {
+        setStatus("error");
+        setMessage("Nejsi přihlášen. Zavři toto okno a zkus to znovu.");
+        setTimeout(() => window.close(), 3000);
+        return;
+      }
+
+      exchangeToken();
+    });
+
     async function exchangeToken() {
       const code = searchParams.get("code");
       const state = searchParams.get("state");
@@ -51,8 +66,6 @@ export default function FacebookCallback() {
         setTimeout(() => window.close(), 3000);
       }
     }
-
-    exchangeToken();
   }, [searchParams]);
 
   return (
@@ -67,7 +80,7 @@ export default function FacebookCallback() {
       }}>
         {status === "loading" && (
           <>
-            <div style={{ fontSize: "2rem", marginBottom: "16px", animation: "spin 1s linear infinite" }}>⏳</div>
+            <div style={{ fontSize: "2rem", marginBottom: "16px" }}>⏳</div>
             <p style={{ color: "#6b7280", fontSize: ".95rem" }}>{message}</p>
           </>
         )}
