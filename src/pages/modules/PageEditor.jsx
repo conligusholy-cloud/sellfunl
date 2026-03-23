@@ -360,13 +360,99 @@ function Toast({ msg }) {
   return <div style={{ position:"fixed", bottom:"20px", right:"20px", background:"#1e1b4b", color:"#fff", padding:"10px 18px", borderRadius:"10px", fontSize:".88rem", fontWeight:500, zIndex:10000, boxShadow:"0 4px 20px rgba(0,0,0,.3)" }}>{msg}</div>;
 }
 
+// ─── HeroClickMenu — menu po kliknutí na Hero ─────────────────────────────────
+function HeroClickMenu({ hero, onSelect }) {
+  const [open, setOpen] = useState(false);
+
+  const items = [
+    hero?.showBadge && { field:"badgeText",   icon:"🏷", label:"Badge text" },
+    hero?.showH1    && { field:"h1Line1",      icon:"✏️", label:"Hlavní nadpis" },
+    hero?.showSub   && { field:"subText",      icon:"📝", label:"Podnadpis" },
+    { field:"btn1Text",    icon:"🔘", label:"Tlačítka" },
+    hero?.showMedia && { field:"mediaUpload",  icon:"🖼", label:"Media" },
+    { field:"bg",          icon:"🎨", label:"Pozadí & styl" },
+  ].filter(Boolean);
+
+  return (
+    <>
+      {/* Průhledný overlay přes celý hero */}
+      <div
+        onClick={() => setOpen(v => !v)}
+        style={{
+          position:"absolute", inset:0, cursor:"pointer", zIndex:5,
+          background: open ? "rgba(124,58,237,0.06)" : "transparent",
+          transition:"background .15s",
+          display:"flex", alignItems:"flex-start", justifyContent:"flex-end",
+          padding:"10px",
+        }}
+        onMouseEnter={e => { if (!open) e.currentTarget.style.background = "rgba(124,58,237,0.04)"; }}
+        onMouseLeave={e => { if (!open) e.currentTarget.style.background = "transparent"; }}
+      >
+        {/* Hint tlačítko */}
+        {!open && (
+          <div style={{
+            background:"#7c3aed", color:"#fff", fontSize:"11px", fontWeight:700,
+            padding:"4px 10px", borderRadius:"20px", display:"flex", alignItems:"center",
+            gap:"5px", boxShadow:"0 2px 8px rgba(124,58,237,.4)", pointerEvents:"none",
+          }}>
+            ✏️ Editovat Hero
+          </div>
+        )}
+      </div>
+
+      {/* Menu */}
+      {open && (
+        <div style={{
+          position:"absolute", top:"10px", right:"10px", zIndex:20,
+          background:"#1e1b4b", borderRadius:"12px", padding:"6px",
+          boxShadow:"0 8px 32px rgba(0,0,0,.4)", minWidth:"180px",
+          display:"flex", flexDirection:"column", gap:"2px",
+        }}
+          onClick={e => e.stopPropagation()}
+        >
+          <div style={{ fontSize:"10px", fontWeight:700, color:"#a78bfa", padding:"4px 8px 6px", textTransform:"uppercase", letterSpacing:".5px" }}>
+            Editovat sekci
+          </div>
+          {items.map(item => (
+            <button key={item.field}
+              onClick={() => { onSelect(item.field); setOpen(false); }}
+              style={{
+                display:"flex", alignItems:"center", gap:"8px",
+                padding:"8px 10px", border:"none", borderRadius:"8px",
+                background:"transparent", color:"#e2e8f0", cursor:"pointer",
+                fontSize:"13px", fontWeight:500, textAlign:"left", width:"100%",
+                transition:"background .1s",
+              }}
+              onMouseEnter={e => e.currentTarget.style.background = "rgba(255,255,255,.1)"}
+              onMouseLeave={e => e.currentTarget.style.background = "transparent"}
+            >
+              <span style={{ fontSize:"15px" }}>{item.icon}</span>
+              {item.label}
+            </button>
+          ))}
+          <button
+            onClick={() => setOpen(false)}
+            style={{
+              marginTop:"4px", padding:"6px", border:"none", borderRadius:"8px",
+              background:"rgba(255,255,255,.07)", color:"#6b7280", cursor:"pointer",
+              fontSize:"11px", fontWeight:600,
+            }}
+          >
+            ✕ Zavřít
+          </button>
+        </div>
+      )}
+    </>
+  );
+}
+
 // ─── EditablePageContent — funguje ve všech mockupech i desktop náhledu ───────
 function EditablePageContent({ hero, page, formFields, onUpdate, renderMediaBlock, mediaBlocks, onHeroClick, heroKey }) {
   return (
     <div>
       <style>{INLINE_STYLES}</style>
 
-      {/* Hero iframe s klikatelnými zónami */}
+      {/* Hero iframe — klik otevře menu */}
       <div style={{ position:"relative" }}>
         <iframe
           key={heroKey || hero?.height}
@@ -387,35 +473,8 @@ function EditablePageContent({ hero, page, formFields, onUpdate, renderMediaBloc
             pointerEvents:"none",
           }}
         />
-        <style>{`
-          .hz{position:absolute;cursor:pointer;border:2px solid transparent;border-radius:6px;transition:border-color .15s,background .15s;box-sizing:border-box;}
-          .hz:hover{border-color:#7c3aed99;background:rgba(124,58,237,0.07);}
-          .hz:hover .hz-tip{display:flex;}
-          .hz-tip{display:none;position:absolute;top:-26px;left:0;background:#7c3aed;color:#fff;font-size:10px;font-weight:700;padding:3px 8px;border-radius:4px;white-space:nowrap;z-index:20;align-items:center;gap:4px;pointer-events:none;box-shadow:0 2px 8px rgba(124,58,237,.35);}
-        `}</style>
-        {hero?.showBadge && (
-          <div className="hz" style={{top:"14%",left:"4%",width:"30%",height:"7%"}} onClick={()=>onHeroClick("badgeText")}>
-            <span className="hz-tip">✏️ Badge text</span>
-          </div>
-        )}
-        {hero?.showH1 && (
-          <div className="hz" style={{top:"22%",left:"3%",width:"55%",height:"28%"}} onClick={()=>onHeroClick("h1Line1")}>
-            <span className="hz-tip">✏️ Hlavní nadpis</span>
-          </div>
-        )}
-        {hero?.showSub && (
-          <div className="hz" style={{top:"51%",left:"3%",width:"50%",height:"10%"}} onClick={()=>onHeroClick("subText")}>
-            <span className="hz-tip">✏️ Podnadpis</span>
-          </div>
-        )}
-        <div className="hz" style={{top:"68%",left:"3%",width:"45%",height:"14%"}} onClick={()=>onHeroClick("btn1Text")}>
-          <span className="hz-tip">✏️ Tlačítka</span>
-        </div>
-        {hero?.showMedia && (
-          <div className="hz" style={{top:"8%",right:"2%",width:"38%",height:"80%"}} onClick={()=>onHeroClick("mediaUpload")}>
-            <span className="hz-tip">🖼 Media</span>
-          </div>
-        )}
+        {/* Overlay — klik otevře menu */}
+        <HeroClickMenu hero={hero} onSelect={onHeroClick} />
       </div>
 
       {/* ── Headline & Subline ── */}
