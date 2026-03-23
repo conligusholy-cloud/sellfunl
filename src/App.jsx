@@ -34,6 +34,9 @@ export default function App() {
         {/* Veřejná publikovaná stránka — BEZ přihlášení */}
         <Route path="/p/:id"          element={<PublicPage />} />
 
+        {/* FB callback — MIMO PrivateRoute (popup, auth se nestihne načíst) */}
+        <Route path="/fb-ads/callback" element={<FacebookCallback />} />
+
         {/* Chráněné stránky (vyžadují přihlášení) */}
         <Route element={<PrivateRoute user={user} />}>
           {/* Dashboard jako layout — sidebar + header na všech podstránkách */}
@@ -44,8 +47,6 @@ export default function App() {
             <Route path="/domains"    element={<Domains />} />
             <Route path="/fb-ads"     element={<FacebookAds />} />
           </Route>
-          {/* Callback je popup — bez sidebaru */}
-          <Route path="/fb-ads/callback" element={<FacebookCallback />} />
         </Route>
 
         {/* Výchozí přesměrování */}
