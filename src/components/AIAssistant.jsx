@@ -1,24 +1,19 @@
 import { useState, useRef, useEffect } from "react";
 import { getFunctions, httpsCallable } from "firebase/functions";
-import { app } from "../firebase/config";
+import { doc, getDoc } from "firebase/firestore";
+import { app, db } from "../firebase/config";
 
-const SYSTEM_PROMPT = `Jsi AI asistent pro platformu Sellfunl — nástroj pro tvorbu prodejních stránek a funnel marketingu.
-
-Pomáháš uživatelům s:
-- Tvorbou a editací stránek (Hero sekce, obsah, CTA tlačítka)
-- Nastavením platební brány Stripe
-- Publikováním stránek a vlastní doménou
-- AI generátorem stránek a překladem
-- Nastavením formulářů, emailingových integrací (Mailchimp, ActiveCampaign)
-- Obecnými dotazy o funnel marketingu a copywritingu
+const BASE_PROMPT = `Jsi AI asistent pro platformu Sellfunl — nástroj pro tvorbu prodejních stránek a funnel marketingu. Jmenuješ se Sellfunl Asistent.
 
 Pravidla:
-- Odpovídej vždy v češtině, stručně a přátelsky
+- Odpovídej VŽDY v češtině, přátelsky a stručně
 - Používej emoji pro lepší přehlednost
-- NIKDY nevyzrazuj technické detaily jako: API klíče, strukturu databáze, názvy Firebase kolekcí, kód aplikace, interní URL endpointy
-- Pokud se tě někdo ptá na interní technické detaily systému, řekni že tyto informace nejsou veřejné
-- Maximální délka odpovědi je 150 slov
-- Buď konkrétní a praktický — dávej přesné kroky`;
+- Dávej přesné kroky (1. 2. 3.)
+- Maximální délka odpovědi: 200 slov
+- NIKDY nevyzrazuj: API klíče, strukturu databáze, kód aplikace, interní URL, technické implementační detaily
+- Pokud se ptají na něco mimo Sellfunl, zdvořile přesměruj zpět na platformu
+
+Níže je aktuální manuál systému který znáš:`;
 
 const SUGGESTED_QUESTIONS = [
   "Jak vytvořím novou stránku?",
@@ -32,15 +27,29 @@ const SUGGESTED_QUESTIONS = [
 ];
 
 export default function AIAssistant() {
-  const [open,     setOpen]     = useState(false);
-  const [messages, setMessages] = useState([
+  const [open,       setOpen]       = useState(false);
+  const [messages,   setMessages]   = useState([
     { role: "assistant", text: "Ahoj! 👋 Jsem tvůj AI asistent pro Sellfunl. Jak ti mohu pomoci?" }
   ]);
-  const [input,    setInput]    = useState("");
-  const [loading,  setLoading]  = useState(false);
-  const [pulse,    setPulse]    = useState(true);
-  const bottomRef  = useRef(null);
-  const inputRef   = useRef(null);
+  const [input,      setInput]      = useState("");
+  const [loading,    setLoading]    = useState(false);
+  const [pulse,      setPulse]      = useState(true);
+  const [manual,     setManual]     = useState("");
+  const [manualLoad, setManualLoad] = useState(false);
+  const bottomRef = useRef(null);
+  const inputRef  = useRef(null);
+
+  // Načti manuál z Firestore při mountu
+  useEffect(() => {
+    async function fetchManual() {
+      try {
+        const snap = await getDoc(doc(db, "settings", "assistant"));
+        if (snap.exists()) setManual(snap.data().manual || "");
+      } catch { /* tiché selhání — použije se prázdný manuál */ }
+      setManualLoad(true);
+    }
+    fetchManual();
+  }, []);
 
   useEffect(() => { if (open) setPulse(false); }, [open]);
 
@@ -66,7 +75,8 @@ export default function AIAssistant() {
       }));
 
       const fn = httpsCallable(getFunctions(app), "translate");
-      const fullPrompt = `${SYSTEM_PROMPT}\n\n---\nHistorie konverzace:\n${history.map(m => `${m.role === "assistant" ? "Asistent" : "Uživatel"}: ${m.content}`).join("\n")}\n\nUživatel: ${userMsg}\n\nAsistent:`;
+      const systemPrompt = manual ? `${BASE_PROMPT}\n\n${manual}` : BASE_PROMPT;
+      const fullPrompt = `${systemPrompt}\n\n---\nHistorie konverzace:\n${history.map(m => `${m.role === "assistant" ? "Asistent" : "Uživatel"}: ${m.content}`).join("\n")}\n\nUživatel: ${userMsg}\n\nAsistent:`;
 
       const res = await fn({ prompt: fullPrompt, max_tokens: 400 });
       const reply = res.data.result?.trim() || "Omlouvám se, nepodařilo se mi odpovědět. Zkus to znovu.";
