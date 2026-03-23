@@ -12,8 +12,9 @@ import PageEditor    from "./pages/modules/PageEditor";
 import PublicPage    from "./pages/PublicPage";
 import Domains       from "./pages/Domains";
 
-// Ochrana přihlášených stránek
+// Komponenty
 import PrivateRoute  from "./components/PrivateRoute";
+import AIAssistant   from "./components/AIAssistant";
 
 export default function App() {
   const { user, loading } = useAuthState();
@@ -43,6 +44,9 @@ export default function App() {
         {/* Výchozí přesměrování */}
         <Route path="*" element={<Navigate to={user ? "/dashboard" : "/login"} />} />
       </Routes>
+
+      {/* AI asistent — zobrazí se jen přihlášeným uživatelům */}
+      {user && <AIAssistant />}
     </BrowserRouter>
   );
 }
