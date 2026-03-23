@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { useParams } from "react-router-dom";
 import { doc, getDoc, addDoc, collection } from "firebase/firestore";
 import { db } from "../firebase/config";
@@ -6,17 +6,17 @@ import { buildHeroHtml } from "./modules/HeroEditor";
 
 export default function PublicPage() {
   const { id } = useParams();
-  const [page,    setPage]    = useState(null);
-  const [loading, setLoading] = useState(true);
+  const [page,      setPage]      = useState(null);
+  const [loading,   setLoading]   = useState(true);
   const [submitted, setSubmitted] = useState(false);
-  const [formData, setFormData] = useState({});
+  const [formData,  setFormData]  = useState({});
+  const iframeRef = useRef(null);
 
   useEffect(() => {
     async function fetchPage() {
       const snap = await getDoc(doc(db, "pages", id));
       if (snap.exists()) {
         setPage(snap.data());
-        // Zaznamenej návštěvu
         try {
           await addDoc(collection(db, "visits"), { pageId: id, ts: Date.now() });
         } catch {}
@@ -25,6 +25,30 @@ export default function PublicPage() {
     }
     fetchPage();
   }, [id]);
+
+  // Oprava výšky iframe — důležité pro iOS Safari
+  function handleIframeLoad(e) {
+    try {
+      const iframe = e.target;
+      const d = iframe.contentDocument || iframe.contentWindow?.document;
+      if (!d) return;
+
+      function resize() {
+        const h = Math.max(
+          d.documentElement?.scrollHeight || 0,
+          d.body?.scrollHeight || 0,
+          d.documentElement?.offsetHeight || 0,
+        );
+        if (h > 50) iframe.style.height = h + "px";
+      }
+
+      resize();
+      // Opakovaný resize pro iOS kde se výška načítá se zpožděním
+      setTimeout(resize, 100);
+      setTimeout(resize, 300);
+      setTimeout(resize, 600);
+    } catch {}
+  }
 
   async function handleSubmit() {
     try {
@@ -51,12 +75,17 @@ export default function PublicPage() {
     </div>
   );
 
+  // ── Vyber správné hero ──
+  // Priorita: heroes["full"] → hero → null
+  const heroData = page.heroes?.["full"] || page.heroes?.["mockup-laptop"] || page.hero || null;
+
   const formFields = page.formFields || [];
 
   return (
     <>
       <style>{`
-        * { box-sizing: border-box; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { background: #f8f8fc; }
         .pub-container { max-width:720px; margin:0 auto; background:#fff; min-height:100vh; box-shadow:0 0 40px rgba(0,0,0,.08); }
         .pub-hero-text { padding:36px 48px 24px; border-bottom:1px solid #f0f0f0; }
         .pub-body      { padding:24px 48px; border-bottom:1px solid #f0f0f0; }
@@ -75,6 +104,7 @@ export default function PublicPage() {
         .pub-content em { font-style:italic; }
         .pub-content img { max-width:100% !important; height:auto !important; border-radius:8px; }
         .pub-content video { max-width:100% !important; border-radius:8px; }
+        .pub-hero-iframe { border:none; width:100%; display:block; overflow:hidden; -webkit-overflow-scrolling:touch; }
 
         @media (max-width: 600px) {
           .pub-hero-text { padding:24px 20px 20px; }
@@ -82,32 +112,30 @@ export default function PublicPage() {
           .pub-cta       { padding:20px 20px 36px; }
           .pub-hero-text h1 { font-size:1.5rem !important; }
           .pub-hero-text p  { font-size:.95rem !important; }
-          .pub-content       { font-size:.9rem !important; }
-          .pub-price         { font-size:1.6rem !important; }
+          .pub-content      { font-size:.9rem !important; }
+          .pub-price        { font-size:1.6rem !important; }
         }
       `}</style>
 
       <div style={{ fontFamily:"-apple-system,'Inter',sans-serif", background:"#f8f8fc", minHeight:"100vh" }}>
         <div className="pub-container">
 
-          {/* Hero sekce */}
-          {page.hero && (
+          {/* ── Hero sekce ── */}
+          {heroData && (
             <iframe
-              srcDoc={buildHeroHtml(page.hero)}
+              ref={iframeRef}
+              className="pub-hero-iframe"
+              srcDoc={buildHeroHtml(heroData)}
               sandbox="allow-scripts"
               scrolling="no"
-              onLoad={e => {
-                try {
-                  const d = e.target.contentDocument;
-                  const h = d?.documentElement?.scrollHeight || d?.body?.scrollHeight;
-                  if (h) e.target.style.height = h + "px";
-                } catch {}
+              onLoad={handleIframeLoad}
+              style={{
+                minHeight: heroData.height === "100vh" ? "100vh" : (heroData.height || "400px"),
               }}
-              style={{ border:"none", width:"100%", minHeight:"300px", display:"block" }}
             />
           )}
 
-          {/* Nadpis + podnadpis */}
+          {/* ── Nadpis + podnadpis ── */}
           {(page.headline || page.subline || page.image) && (
             <div className="pub-hero-text">
               {page.image && (
@@ -126,7 +154,7 @@ export default function PublicPage() {
             </div>
           )}
 
-          {/* Obsah */}
+          {/* ── Obsah ── */}
           {(page.text || page.video) && (
             <div className="pub-body">
               {page.text && (
@@ -147,7 +175,7 @@ export default function PublicPage() {
             </div>
           )}
 
-          {/* Formulář + CTA */}
+          {/* ── Formulář + CTA ── */}
           <div className="pub-cta">
             {submitted ? (
               <div style={{ textAlign:"center", padding:"32px 0" }}>
@@ -157,51 +185,40 @@ export default function PublicPage() {
               </div>
             ) : (
               <>
-                {/* Formulářová pole */}
                 {formFields.length > 0 && (
                   <div style={{ marginBottom:"16px" }}>
                     {formFields.map((f, i) => {
-                      if (f === "Zpráva" || f === "Message" || f === "Nachricht") {
-                        return (
-                          <textarea key={i} className="pub-textarea" placeholder={f}
-                            onChange={e => setFormData(d => ({ ...d, [f]: e.target.value }))} />
-                        );
-                      }
-                      if (f === "Souhlas GDPR" || f === "GDPR") {
-                        return (
-                          <label key={i} style={{ display:"flex", gap:"8px", alignItems:"flex-start", fontSize:".82rem", color:"#6b7280", marginBottom:"10px", cursor:"pointer" }}>
-                            <input type="checkbox" style={{ marginTop:"2px", accentColor:"#7c3aed" }}
-                              onChange={e => setFormData(d => ({ ...d, [f]: e.target.checked }))} />
-                            Souhlasím se zpracováním osobních údajů
-                          </label>
-                        );
-                      }
+                      if (f === "Zpráva" || f === "Message" || f === "Nachricht") return (
+                        <textarea key={i} className="pub-textarea" placeholder={f}
+                          onChange={e => setFormData(d => ({ ...d, [f]: e.target.value }))} />
+                      );
+                      if (f === "Souhlas GDPR" || f === "GDPR") return (
+                        <label key={i} style={{ display:"flex", gap:"8px", alignItems:"flex-start", fontSize:".82rem", color:"#6b7280", marginBottom:"10px", cursor:"pointer" }}>
+                          <input type="checkbox" style={{ marginTop:"2px", accentColor:"#7c3aed" }}
+                            onChange={e => setFormData(d => ({ ...d, [f]: e.target.checked }))} />
+                          Souhlasím se zpracováním osobních údajů
+                        </label>
+                      );
                       return (
                         <input key={i} className="pub-input" placeholder={f}
-                          type={f.toLowerCase().includes("email") || f.toLowerCase().includes("e-mail") ? "email" : "text"}
+                          type={f.toLowerCase().includes("email") ? "email" : "text"}
                           onChange={e => setFormData(d => ({ ...d, [f]: e.target.value }))} />
                       );
                     })}
                   </div>
                 )}
 
-                {/* Cena */}
                 {page.price && (
                   <div className="pub-price" style={{ fontSize:"2rem", fontWeight:800, color:"#7c3aed", marginBottom:"16px" }}>
                     {page.price}
                   </div>
                 )}
 
-                {/* CTA tlačítko */}
                 {page.btnText && (
                   formFields.length > 0 ? (
-                    <button className="pub-btn" onClick={handleSubmit}>
-                      {page.btnText}
-                    </button>
+                    <button className="pub-btn" onClick={handleSubmit}>{page.btnText}</button>
                   ) : (
-                    <a href={page.btnUrl || "#"} className="pub-btn">
-                      {page.btnText}
-                    </a>
+                    <a href={page.btnUrl || "#"} className="pub-btn">{page.btnText}</a>
                   )
                 )}
               </>
