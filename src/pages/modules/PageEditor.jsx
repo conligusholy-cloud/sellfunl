@@ -1,11 +1,10 @@
-import { useEffect, useRef, useState } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useEffect, useRef, useState } from "react";import { useParams, useNavigate } from "react-router-dom";
 import { doc, getDoc, updateDoc } from "firebase/firestore";
 import { db, app, storage } from "../../firebase/config";
 import { ref as storageRef, uploadBytesResumable, getDownloadURL } from "firebase/storage";
 import { getFunctions, httpsCallable } from "firebase/functions";
 import { useAuthState } from "../../hooks/useAuthState";
-import HeroEditor, { DEFAULT_HERO, buildHeroHtml } from "./HeroEditor";
+import HeroEditor, { DEFAULT_HERO, buildHeroHtml, FIELD_SELECTORS } from "./HeroEditor";
 import AIPageGenerator from "../../components/AIPageGenerator";
 import AITranslator from "../../components/AITranslator";
 import PageActions from "./PageActions";
@@ -42,7 +41,6 @@ const DEVICES = [
   { key:"mockup-laptop", label:"💻 Mockup laptop", mockup:true },
 ];
 
-// ─── Inline styly sdílené ─────────────────────────────────────────────────────
 const INLINE_STYLES = `
   .inline-section { position: relative; }
   .inline-section:hover { outline: 1px dashed #c4b5fd44; }
@@ -360,48 +358,40 @@ function Toast({ msg }) {
   return <div style={{ position:"fixed", bottom:"20px", right:"20px", background:"#1e1b4b", color:"#fff", padding:"10px 18px", borderRadius:"10px", fontSize:".88rem", fontWeight:500, zIndex:10000, boxShadow:"0 4px 20px rgba(0,0,0,.3)" }}>{msg}</div>;
 }
 
-// ─── HeroClickMenu — menu po kliknutí na Hero ─────────────────────────────────
+// ─── HeroClickMenu ────────────────────────────────────────────────────────────
 function HeroClickMenu({ hero, onSelect }) {
-  const [open, setOpen] = useState(false);
-  const [flash, setFlash] = useState(null); // label právě kliknuté položky
+  const [open,  setOpen]  = useState(false);
+  const [flash, setFlash] = useState(false);
 
   const items = [
-    hero?.showBadge && { field:"badgeText",   icon:"🏷", label:"Badge text" },
-    hero?.showH1    && { field:"h1Line1",      icon:"✏️", label:"Hlavní nadpis" },
-    hero?.showSub   && { field:"subText",      icon:"📝", label:"Podnadpis" },
-    { field:"btn1Text",    icon:"🔘", label:"Tlačítka" },
-    hero?.showMedia && { field:"mediaUpload",  icon:"🖼", label:"Media" },
-    { field:"bg",          icon:"🎨", label:"Pozadí & styl" },
+    hero?.showBadge && { field:"badgeText",  icon:"🏷", label:"Badge text" },
+    hero?.showH1    && { field:"h1Line1",     icon:"✏️", label:"Hlavní nadpis" },
+    hero?.showSub   && { field:"subText",     icon:"📝", label:"Podnadpis" },
+    { field:"btn1Text",   icon:"🔘", label:"Tlačítka" },
+    hero?.showMedia && { field:"mediaUpload", icon:"🖼", label:"Media" },
+    { field:"bg",         icon:"🎨", label:"Pozadí & styl" },
   ].filter(Boolean);
 
   function handleSelect(item) {
     setOpen(false);
-    setFlash(item.label);
-    setTimeout(() => setFlash(null), 1500);
+    setFlash(true);
+    setTimeout(() => setFlash(false), 800);
     onSelect(item.field);
   }
 
   return (
     <>
-      {/* Malý toast banner — jen dole na hero, ne celý overlay */}
+      <style>{`@keyframes hfIn{from{opacity:0}to{opacity:1}}`}</style>
+
       {flash && (
         <div style={{
-          position:"absolute", bottom:"10px", left:"50%",
-          transform:"translateX(-50%)",
-          zIndex:15, pointerEvents:"none",
-          background:"#eab308", color:"#1a1a1a",
-          fontSize:"12px", fontWeight:700,
-          padding:"5px 14px", borderRadius:"20px",
-          boxShadow:"0 2px 8px rgba(0,0,0,.25)",
-          whiteSpace:"nowrap",
-          animation:"heroFlash .25s ease",
-        }}>
-          <style>{`@keyframes heroFlash{from{opacity:0;transform:translateX(-50%) translateY(6px)}to{opacity:1;transform:translateX(-50%) translateY(0)}}`}</style>
-          ✏️ {flash} — upravuji v panelu vlevo
-        </div>
+          position:"absolute", inset:"-3px", zIndex:15, pointerEvents:"none",
+          border:"3px solid #eab308", borderRadius:"8px",
+          boxShadow:"0 0 0 4px rgba(234,179,8,.25)",
+          animation:"hfIn .15s ease forwards",
+        }} />
       )}
 
-      {/* Průhledný overlay přes celý hero */}
       <div
         onClick={() => setOpen(v => !v)}
         style={{
@@ -414,7 +404,7 @@ function HeroClickMenu({ hero, onSelect }) {
         onMouseEnter={e => { if (!open) e.currentTarget.style.background = "rgba(124,58,237,0.04)"; }}
         onMouseLeave={e => { if (!open) e.currentTarget.style.background = "transparent"; }}
       >
-        {!open && !flash && (
+        {!open && (
           <div style={{
             background:"#7c3aed", color:"#fff", fontSize:"11px", fontWeight:700,
             padding:"4px 10px", borderRadius:"20px", display:"flex", alignItems:"center",
@@ -425,44 +415,27 @@ function HeroClickMenu({ hero, onSelect }) {
         )}
       </div>
 
-      {/* Menu */}
       {open && (
         <div style={{
           position:"absolute", top:"10px", right:"10px", zIndex:20,
           background:"#1e1b4b", borderRadius:"12px", padding:"6px",
           boxShadow:"0 8px 32px rgba(0,0,0,.4)", minWidth:"180px",
           display:"flex", flexDirection:"column", gap:"2px",
-        }}
-          onClick={e => e.stopPropagation()}
-        >
+        }} onClick={e => e.stopPropagation()}>
           <div style={{ fontSize:"10px", fontWeight:700, color:"#a78bfa", padding:"4px 8px 6px", textTransform:"uppercase", letterSpacing:".5px" }}>
             Editovat sekci
           </div>
           {items.map(item => (
-            <button key={item.field}
-              onClick={() => handleSelect(item)}
-              style={{
-                display:"flex", alignItems:"center", gap:"8px",
-                padding:"8px 10px", border:"none", borderRadius:"8px",
-                background:"transparent", color:"#e2e8f0", cursor:"pointer",
-                fontSize:"13px", fontWeight:500, textAlign:"left", width:"100%",
-                transition:"background .1s",
-              }}
+            <button key={item.field} onClick={() => handleSelect(item)}
+              style={{ display:"flex", alignItems:"center", gap:"8px", padding:"8px 10px", border:"none", borderRadius:"8px", background:"transparent", color:"#e2e8f0", cursor:"pointer", fontSize:"13px", fontWeight:500, textAlign:"left", width:"100%", transition:"background .1s" }}
               onMouseEnter={e => e.currentTarget.style.background = "rgba(255,255,255,.1)"}
-              onMouseLeave={e => e.currentTarget.style.background = "transparent"}
-            >
+              onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
               <span style={{ fontSize:"15px" }}>{item.icon}</span>
               {item.label}
             </button>
           ))}
-          <button
-            onClick={() => setOpen(false)}
-            style={{
-              marginTop:"4px", padding:"6px", border:"none", borderRadius:"8px",
-              background:"rgba(255,255,255,.07)", color:"#6b7280", cursor:"pointer",
-              fontSize:"11px", fontWeight:600,
-            }}
-          >
+          <button onClick={() => setOpen(false)}
+            style={{ marginTop:"4px", padding:"6px", border:"none", borderRadius:"8px", background:"rgba(255,255,255,.07)", color:"#6b7280", cursor:"pointer", fontSize:"11px", fontWeight:600 }}>
             ✕ Zavřít
           </button>
         </div>
@@ -471,136 +444,88 @@ function HeroClickMenu({ hero, onSelect }) {
   );
 }
 
-// ─── EditablePageContent — funguje ve všech mockupech i desktop náhledu ───────
-function EditablePageContent({ hero, page, formFields, onUpdate, renderMediaBlock, mediaBlocks, onHeroClick, heroKey }) {
+// ─── EditablePageContent ──────────────────────────────────────────────────────
+function EditablePageContent({ hero, page, formFields, onUpdate, renderMediaBlock, mediaBlocks, onHeroClick, heroKey, pendingHighlight, onHighlightSent }) {
+  const iframeRef = useRef(null);
+
+  // Přidá highlight CSS přímo do generovaného HTML
+  const highlightHtml = pendingHighlight
+    ? buildHeroHtml(hero, pendingHighlight)
+    : buildHeroHtml(hero);
+
+  // Po zobrazení highlight resetuj po 1.5s přegenerováním bez highlight
+  useEffect(() => {
+    if (!pendingHighlight) return;
+    const t = setTimeout(() => { onHighlightSent(); }, 1500);
+    return () => clearTimeout(t);
+  }, [pendingHighlight]);
+
   return (
     <div>
       <style>{INLINE_STYLES}</style>
-
-      {/* Hero iframe — klik otevře menu */}
       <div style={{ position:"relative" }}>
         <iframe
-          key={heroKey || hero?.height}
-          srcDoc={buildHeroHtml(hero)}
-          sandbox="allow-scripts"
+          ref={iframeRef}
+          key={`${heroKey}-${pendingHighlight||""}`}
+          srcDoc={highlightHtml}
           scrolling="no"
-          onLoad={e => {
+          onLoad={() => {
             try {
-              const d = e.target.contentDocument;
+              const d = iframeRef.current?.contentDocument;
               const h = d?.documentElement?.scrollHeight || d?.body?.scrollHeight;
-              if (h) e.target.style.height = h + "px";
+              if (h) iframeRef.current.style.height = h + "px";
             } catch {}
           }}
-          style={{
-            border:"none", width:"100%",
-            minHeight: hero?.height === "100vh" ? "100vh" : (hero?.height || "400px"),
-            display:"block", overflow:"hidden",
-            pointerEvents:"none",
-          }}
+          style={{ border:"none", width:"100%", minHeight: hero?.height === "100vh" ? "100vh" : (hero?.height || "400px"), display:"block", overflow:"hidden", pointerEvents:"none" }}
         />
-        {/* Overlay — klik otevře menu */}
         <HeroClickMenu hero={hero} onSelect={onHeroClick} />
       </div>
 
-      {/* ── Headline & Subline ── */}
       <div className="inline-section" style={{ padding:"20px 24px", borderBottom:"1px solid #f0f0f0", position:"relative" }}>
         <span className="inline-section-label">✏️ Hero text</span>
-
-        {page.image && (
-          <img src={page.image} alt=""
-            style={{ width:"100%", maxHeight:"220px", objectFit:"cover", borderRadius:"10px", marginBottom:"14px" }}
-            onError={e => (e.target.style.display = "none")} />
-        )}
-
+        {page.image && <img src={page.image} alt="" style={{ width:"100%", maxHeight:"220px", objectFit:"cover", borderRadius:"10px", marginBottom:"14px" }} onError={e=>(e.target.style.display="none")} />}
         <div className="inline-field">
-          <h1
-            className="inline-editable"
-            contentEditable suppressContentEditableWarning
-            data-placeholder="Klikni a napiš nadpis..."
-            onBlur={e => onUpdate("headline", e.currentTarget.innerText)}
+          <h1 className="inline-editable" contentEditable suppressContentEditableWarning data-placeholder="Klikni a napiš nadpis..."
+            onBlur={e=>onUpdate("headline",e.currentTarget.innerText)}
             style={{ fontSize:"1.4rem", fontWeight:800, color:"#1e1b4b", marginBottom:"8px", lineHeight:1.2, outline:"none" }}
-            dangerouslySetInnerHTML={{ __html: page.headline || "" }}
-          />
+            dangerouslySetInnerHTML={{ __html: page.headline||"" }} />
         </div>
-
         <div className="inline-field">
-          <p
-            className="inline-editable"
-            contentEditable suppressContentEditableWarning
-            data-placeholder="Klikni a napiš podnadpis..."
-            onBlur={e => onUpdate("subline", e.currentTarget.innerText)}
+          <p className="inline-editable" contentEditable suppressContentEditableWarning data-placeholder="Klikni a napiš podnadpis..."
+            onBlur={e=>onUpdate("subline",e.currentTarget.innerText)}
             style={{ fontSize:".9rem", color:"#6b7280", outline:"none" }}
-            dangerouslySetInnerHTML={{ __html: page.subline || "" }}
-          />
+            dangerouslySetInnerHTML={{ __html: page.subline||"" }} />
         </div>
       </div>
 
-      {/* ── Tělo stránky ── */}
       <div className="inline-section" style={{ padding:"16px 24px", borderBottom:"1px solid #f0f0f0", position:"relative" }}>
         <span className="inline-section-label">✏️ Tělo stránky</span>
-
-        {(mediaBlocks || []).filter(m => (m.position || "below") === "above").map((m, i) => renderMediaBlock(m, i))}
-
-        <div
-          className="inline-editable page-content"
-          contentEditable suppressContentEditableWarning
-          data-placeholder="Klikni a začni psát obsah stránky..."
-          onBlur={e => onUpdate("text", e.currentTarget.innerHTML)}
+        {(mediaBlocks||[]).filter(m=>(m.position||"below")==="above").map((m,i)=>renderMediaBlock(m,i))}
+        <div className="inline-editable page-content" contentEditable suppressContentEditableWarning data-placeholder="Klikni a začni psát obsah stránky..."
+          onBlur={e=>onUpdate("text",e.currentTarget.innerHTML)}
           style={{ fontSize:".9rem", color:"#374151", lineHeight:1.75, outline:"none", minHeight:"50px" }}
-          dangerouslySetInnerHTML={{ __html: page.text || "" }}
-        />
-
-        {(mediaBlocks || []).filter(m => (m.position || "below") === "below").map((m, i) => renderMediaBlock(m, i))}
-
+          dangerouslySetInnerHTML={{ __html: page.text||"" }} />
+        {(mediaBlocks||[]).filter(m=>(m.position||"below")==="below").map((m,i)=>renderMediaBlock(m,i))}
         <div style={{ clear:"both" }} />
-
-        {page.video && (
-          <div style={{ marginTop:"14px", borderRadius:"10px", overflow:"hidden", aspectRatio:"16/9" }}>
-            <iframe src={page.video.replace("watch?v=","embed/")} style={{ width:"100%", height:"100%", border:"none" }} allowFullScreen />
-          </div>
-        )}
+        {page.video && <div style={{ marginTop:"14px", borderRadius:"10px", overflow:"hidden", aspectRatio:"16/9" }}><iframe src={page.video.replace("watch?v=","embed/")} style={{ width:"100%", height:"100%", border:"none" }} allowFullScreen /></div>}
       </div>
 
-      {/* ── CTA & Formulář ── */}
       <div className="inline-section" style={{ padding:"16px 24px 28px", position:"relative" }}>
         <span className="inline-section-label">✏️ CTA & Formulář</span>
-
         <div style={{ display:"flex", flexDirection:"column", gap:"7px" }}>
-          {formFields.map((f, i) => {
-            if (f === "Zpráva") return (
-              <textarea key={i} placeholder="Zpráva"
-                style={{ width:"100%", border:"1px solid #e5e7eb", borderRadius:"7px", padding:"7px 10px", fontSize:".82rem", minHeight:"50px", resize:"none", fontFamily:"inherit", background:"#f9fafb", outline:"none", boxSizing:"border-box" }} />
-            );
-            if (f === "Souhlas GDPR") return (
-              <label key={i} style={{ display:"flex", gap:"6px", alignItems:"flex-start", fontSize:".75rem", color:"#6b7280" }}>
-                <input type="checkbox" style={{ marginTop:"2px" }} /> Souhlasím se zpracováním osobních údajů
-              </label>
-            );
-            return (
-              <input key={i} placeholder={f}
-                style={{ width:"100%", border:"1px solid #e5e7eb", borderRadius:"7px", padding:"7px 10px", fontSize:".82rem", background:"#f9fafb", outline:"none", boxSizing:"border-box" }} />
-            );
+          {formFields.map((f,i) => {
+            if (f==="Zpráva") return <textarea key={i} placeholder="Zpráva" style={{ width:"100%", border:"1px solid #e5e7eb", borderRadius:"7px", padding:"7px 10px", fontSize:".82rem", minHeight:"50px", resize:"none", fontFamily:"inherit", background:"#f9fafb", outline:"none", boxSizing:"border-box" }} />;
+            if (f==="Souhlas GDPR") return <label key={i} style={{ display:"flex", gap:"6px", alignItems:"flex-start", fontSize:".75rem", color:"#6b7280" }}><input type="checkbox" style={{ marginTop:"2px" }} /> Souhlasím se zpracováním osobních údajů</label>;
+            return <input key={i} placeholder={f} style={{ width:"100%", border:"1px solid #e5e7eb", borderRadius:"7px", padding:"7px 10px", fontSize:".82rem", background:"#f9fafb", outline:"none", boxSizing:"border-box" }} />;
           })}
-
-          {/* Cena — inline editovatelná */}
-          <div
-            className="inline-editable"
-            contentEditable suppressContentEditableWarning
-            data-placeholder="Klikni a napiš cenu..."
-            onBlur={e => onUpdate("price", e.currentTarget.innerText)}
+          <div className="inline-editable" contentEditable suppressContentEditableWarning data-placeholder="Klikni a napiš cenu..."
+            onBlur={e=>onUpdate("price",e.currentTarget.innerText)}
             style={{ fontSize:"1.6rem", fontWeight:800, color:"#7c3aed", outline:"none", minHeight:"1em" }}
-            dangerouslySetInnerHTML={{ __html: page.price || "" }}
-          />
-
-          {/* CTA tlačítko — inline editovatelné */}
-          <div
-            className="inline-editable"
-            contentEditable suppressContentEditableWarning
-            data-placeholder="Text tlačítka..."
-            onBlur={e => onUpdate("btnText", e.currentTarget.innerText)}
+            dangerouslySetInnerHTML={{ __html: page.price||"" }} />
+          <div className="inline-editable" contentEditable suppressContentEditableWarning data-placeholder="Text tlačítka..."
+            onBlur={e=>onUpdate("btnText",e.currentTarget.innerText)}
             style={{ display:"block", padding:"11px", background:"#7c3aed", color:"#fff", borderRadius:"9px", fontWeight:700, fontSize:".95rem", textAlign:"center", outline:"none", cursor:"text" }}
-            dangerouslySetInnerHTML={{ __html: page.btnText || "" }}
-          />
+            dangerouslySetInnerHTML={{ __html: page.btnText||"" }} />
         </div>
       </div>
     </div>
@@ -637,29 +562,18 @@ export default function PageEditor() {
   const [formFields,    setFormFields]    = useState(["Jméno","Email"]);
   const [publishing,    setPublishing]    = useState(false);
   const [mobileView,    setMobileView]    = useState("editor");
+  const [pendingHighlight, setPendingHighlight] = useState(null);
 
-  // Textová pole která jsou SDÍLENÁ mezi všemi mockupy
   const SHARED_HERO_KEYS = [
-    "showBadge","badgeText",
-    "showH1","h1Line1","h1Accent","h1Line2",
-    "showSub","subText",
-    "showStats","stats",
-    "showScroll",
-    "btn1","btn1Text","btn1Link",
-    "btn2","btn2Text","btn2Link",
-    "btnStyle",
-    "textAnim",
+    "showBadge","badgeText","showH1","h1Line1","h1Accent","h1Line2",
+    "showSub","subText","showStats","stats","showScroll",
+    "btn1","btn1Text","btn1Link","btn2","btn2Text","btn2Link","btnStyle","textAnim",
     "mediaUrl","mediaType","mediaControls","mediaAutoplay","mediaLoop",
   ];
 
-  // Vizuální pole která jsou PER-MOCKUP
-  // (bg, bgCustom, bgCustom2, accentCustom, overlay, layout, height,
-  //  showMedia, mediaPos, mediaStyle, mediaSize, mediaRatio, bgAnim)
-
   const currentHero = heroes[devMode] || heroes["full"] || DEFAULT_HERO;
-
-  // Klíč pro force-refresh hero iframe při změně textu
-  const heroKey = `${devMode}-${currentHero?.height}-${currentHero?.badgeText}-${currentHero?.h1Line1}-${currentHero?.h1Accent}-${currentHero?.h1Line2}-${currentHero?.subText}-${currentHero?.btn1Text}-${currentHero?.btn2Text}`;
+  // heroKey — pouze vizuální vlastnosti (NE texty) aby se iframe nepřekresloval při psaní
+  const heroKey = `${devMode}-${currentHero?.height}-${currentHero?.bg}-${currentHero?.layout}-${currentHero?.overlay}-${currentHero?.bgAnim}-${currentHero?.showMedia}-${currentHero?.mediaPos}`;
   const isMobile = window.innerWidth < 768;
   const isMockup = devMode.startsWith("mockup");
   const publicUrl = `${PUBLIC_BASE_URL}${id}`;
@@ -668,21 +582,11 @@ export default function PageEditor() {
   function setCurrentHero(h) {
     setHeroes(prev => {
       const updated = { ...prev, [devMode]: h };
-
-      // Synchronizuj sdílené klíče do VŠECH ostatních mockupů
       const sharedChanges = {};
-      SHARED_HERO_KEYS.forEach(k => {
-        if (h[k] !== (prev[devMode] || {})[k]) sharedChanges[k] = h[k];
-      });
-
+      SHARED_HERO_KEYS.forEach(k => { if (h[k] !== (prev[devMode]||{})[k]) sharedChanges[k] = h[k]; });
       if (Object.keys(sharedChanges).length > 0) {
-        Object.keys(updated).forEach(key => {
-          if (key !== devMode) {
-            updated[key] = { ...updated[key], ...sharedChanges };
-          }
-        });
+        Object.keys(updated).forEach(key => { if (key !== devMode) updated[key] = { ...updated[key], ...sharedChanges }; });
       }
-
       return updated;
     });
   }
@@ -691,7 +595,6 @@ export default function PageEditor() {
     setDevMode(key);
     setHeroes(h => {
       if (!h[key]) {
-        // Nový mockup zdědí sdílené texty z aktuálního + vizuální z DEFAULT
         const base = h[devMode] || h["full"] || DEFAULT_HERO;
         const newHero = { ...DEFAULT_HERO };
         SHARED_HERO_KEYS.forEach(k => { newHero[k] = base[k]; });
@@ -781,38 +684,46 @@ export default function PageEditor() {
     divider: { border:"none", borderTop:"1px solid var(--border)", margin:"13px 0" },
   };
 
-  // Sdílené props pro EditablePageContent
   function highlightField(el) {
     if (!el) return;
     el.scrollIntoView({ behavior:"smooth", block:"center" });
     el.focus();
-    el.style.transition = "background .2s";
-    el.style.background = "#fef08a";
-    el.style.borderColor = "#eab308";
+    // Uložíme původní styly
+    const origBg     = el.style.background;
+    const origColor  = el.style.color;
+    const origWeight = el.style.fontWeight;
+    const origBorder = el.style.border;
+    const origTrans  = el.style.transition;
+    // Aplikujeme zvýraznění
+    el.style.transition  = "all .2s";
+    el.style.background  = "#fef08a";
+    el.style.color       = "#1a1a1a";
+    el.style.fontWeight  = "700";
+    el.style.border      = "2px solid #eab308";
+    el.style.borderRadius = "6px";
+    // Po 1.5s vrátíme původní styly
     setTimeout(() => {
-      el.style.background = "";
-      el.style.borderColor = "";
-    }, 1800);
+      el.style.transition  = "all .3s";
+      el.style.background  = origBg;
+      el.style.color       = origColor;
+      el.style.fontWeight  = origWeight;
+      el.style.border      = origBorder;
+      setTimeout(() => { el.style.transition = origTrans; }, 300);
+    }, 1500);
   }
 
   function handleHeroClick(field) {
     setActiveTab(0);
+    // Nastav pending highlight pro náhled v iframe
+    const selector = FIELD_SELECTORS[field];
+    if (selector) setPendingHighlight(selector);
     setTimeout(() => {
       const el = panelRef.current?.querySelector(`[data-hero-field="${field}"]`);
       highlightField(el);
     }, 120);
   }
 
-  const editableProps = {
-    hero: currentHero,
-    page,
-    formFields,
-    onUpdate: update,
-    renderMediaBlock,
-    mediaBlocks,
-    onHeroClick: handleHeroClick,
-    heroKey,
-  };
+  const editableProps = { hero:currentHero, page, formFields, onUpdate:update, renderMediaBlock, mediaBlocks, onHeroClick:handleHeroClick, heroKey, pendingHighlight, onHighlightSent:()=>setPendingHighlight(null) };
 
   if (loading) return <div className="loading">Načítám editor...</div>;
   if (!page)   return <div className="loading">Stránka nenalezena.</div>;
@@ -838,7 +749,6 @@ export default function PageEditor() {
         {/* ══ LEVÝ PANEL ══ */}
         <div ref={panelRef} style={{ width:isMobile?"100%":"380px", minWidth:isMobile?"unset":"360px", background:"var(--bg-card)", borderRight:"1px solid var(--border)", display:isMobile&&mobileView!=="editor"?"none":"flex", flexDirection:"column", overflow:"hidden", flex:isMobile?1:"unset" }}>
 
-          {/* Topbar */}
           <div style={{ padding:"10px 14px", borderBottom:"1px solid var(--border)", display:"flex", alignItems:"center", gap:"7px", flexShrink:0 }}>
             <button style={S.btnOut} onClick={()=>navigate("/pages")}>← Zpět</button>
             {editingName ? (
@@ -858,7 +768,6 @@ export default function PageEditor() {
             </button>
           </div>
 
-          {/* Publish URL */}
           {page.published && (
             <div style={{ padding:"7px 14px", background:"#f0fdf4", borderBottom:"1px solid #bbf7d0", display:"flex", alignItems:"center", gap:"7px", flexShrink:0 }}>
               <span style={{ fontSize:".75rem", color:"#059669", flex:1, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>🌐 {publicUrl}</span>
@@ -867,7 +776,6 @@ export default function PageEditor() {
             </div>
           )}
 
-          {/* Jazyk */}
           <div style={{ padding:"7px 14px", borderBottom:"1px solid var(--border)", background:"var(--bg)", flexShrink:0 }}>
             <div style={{ display:"flex", alignItems:"center", gap:"6px" }}>
               <span style={{ fontSize:".72rem", fontWeight:600, color:"var(--text-muted)" }}>JAZYK:</span>
@@ -877,7 +785,6 @@ export default function PageEditor() {
             </div>
           </div>
 
-          {/* Záložky */}
           <div style={{ display:"flex", borderBottom:"1px solid var(--border)", flexShrink:0 }}>
             {[{label:"🏠 Hero",color:"#7c3aed"},{label:"📝 Obsah",color:"#0891b2"},{label:"⚙️ Akce",color:"#16a34a"}].map((tab,i) => (
               <button key={i} onClick={()=>setActiveTab(i)}
@@ -887,7 +794,6 @@ export default function PageEditor() {
             ))}
           </div>
 
-          {/* ZÁLOŽKA 0: Hero */}
           {activeTab===0 && (
             <div style={{ flex:1, overflowY:"auto", display:"flex", flexDirection:"column" }}>
               <div style={{ padding:"10px 12px", borderBottom:"1px solid var(--border)" }}>
@@ -936,8 +842,6 @@ export default function PageEditor() {
 
           {activeTab!==0 && (
             <div style={{ flex:1, overflowY:"auto" }}>
-
-              {/* ZÁLOŽKA 1: Obsah */}
               {activeTab===1 && (
                 <div style={{ padding:"15px" }}>
                   <FieldInput label="Obrázek (URL)" value={page.image} onChange={v=>update("image",v)} placeholder="https://..." />
@@ -1005,16 +909,8 @@ export default function PageEditor() {
                   <FieldInput label="Video (YouTube URL)" value={page.video} onChange={v=>update("video",v)} placeholder="https://youtube.com/..." />
                 </div>
               )}
-
-              {/* ZÁLOŽKA 2: Akce */}
               {activeTab===2 && (
-                <PageActions
-                  page={page}
-                  update={update}
-                  formFields={formFields}
-                  setFormFields={setFormFields}
-                  userId={user?.uid}
-                />
+                <PageActions page={page} update={update} formFields={formFields} setFormFields={setFormFields} userId={user?.uid} />
               )}
             </div>
           )}
@@ -1033,11 +929,8 @@ export default function PageEditor() {
             ))}
           </div>
 
-          {/* ── MOCKUP ZOBRAZENÍ ── */}
           {isMockup && (
             <div style={{ flex:1, display:"flex", alignItems:"flex-start", justifyContent:"center", padding:"30px 20px", overflowY:"auto", width:"100%" }}>
-
-              {/* 📱 MOBIL */}
               {devMode==="mockup-mobile" && (
                 <div style={{ position:"relative", flexShrink:0 }}>
                   <div style={{ background:"#111", borderRadius:"48px", padding:"14px", boxShadow:"0 40px 100px rgba(0,0,0,.7), inset 0 0 0 2px #333, inset 0 0 0 3px #111", position:"relative", width:"300px" }}>
@@ -1058,8 +951,6 @@ export default function PageEditor() {
                   <div style={{ textAlign:"center", marginTop:"8px", fontSize:"11px", color:"rgba(255,255,255,.3)", fontWeight:600 }}>iPhone 14 Pro • 390×844</div>
                 </div>
               )}
-
-              {/* 🖥 TABLET */}
               {devMode==="mockup-tablet" && (
                 <div style={{ position:"relative", flexShrink:0 }}>
                   <div style={{ background:"#1a1a1a", borderRadius:"20px", padding:"16px 12px", boxShadow:"0 40px 100px rgba(0,0,0,.7), inset 0 0 0 2px #333", position:"relative", width:"620px" }}>
@@ -1067,25 +958,19 @@ export default function PageEditor() {
                     <div style={{ position:"absolute", right:"-4px", top:"50%", transform:"translateY(-50%)", width:"4px", height:"70px", background:"#222", borderRadius:"0 3px 3px 0" }} />
                     <div style={{ position:"absolute", left:"-4px", top:"30%", width:"4px", height:"40px", background:"#222", borderRadius:"3px 0 0 3px" }} />
                     <div style={{ borderRadius:"10px", overflow:"hidden", height:"760px", background:"#fff" }}>
-                      <div style={{ height:"100%", overflowY:"auto" }}>
-                        <EditablePageContent {...editableProps} />
-                      </div>
+                      <div style={{ height:"100%", overflowY:"auto" }}><EditablePageContent {...editableProps} /></div>
                     </div>
                     <div style={{ width:"80px", height:"3px", background:"rgba(255,255,255,.2)", borderRadius:"2px", margin:"10px auto 0" }} />
                   </div>
                   <div style={{ textAlign:"center", marginTop:"8px", fontSize:"11px", color:"rgba(255,255,255,.3)", fontWeight:600 }}>iPad Pro • 834×1194</div>
                 </div>
               )}
-
-              {/* 💻 LAPTOP */}
               {devMode==="mockup-laptop" && (
                 <div style={{ position:"relative", flexShrink:0, width:"min(860px, 90vw)" }}>
                   <div style={{ background:"linear-gradient(180deg,#2a2a2a,#222)", borderRadius:"14px 14px 0 0", padding:"14px 14px 0", boxShadow:"0 -2px 20px rgba(0,0,0,.5)" }}>
                     <div style={{ display:"flex", justifyContent:"center", marginBottom:"10px" }}><div style={{ width:"6px", height:"6px", background:"#444", borderRadius:"50%", boxShadow:"0 0 0 2px #333" }} /></div>
                     <div style={{ borderRadius:"6px 6px 0 0", overflow:"hidden", height:"480px", background:"#fff", border:"2px solid #333", borderBottom:"none" }}>
-                      <div style={{ height:"100%", overflowY:"auto" }}>
-                        <EditablePageContent {...editableProps} />
-                      </div>
+                      <div style={{ height:"100%", overflowY:"auto" }}><EditablePageContent {...editableProps} /></div>
                     </div>
                   </div>
                   <div style={{ background:"linear-gradient(180deg,#252525,#1e1e1e)", height:"18px", borderRadius:"0 0 2px 2px", boxShadow:"0 4px 20px rgba(0,0,0,.5)" }} />
@@ -1097,12 +982,11 @@ export default function PageEditor() {
             </div>
           )}
 
-          {/* ── DESKTOP NÁHLED (bez mockupu) ── */}
           {!isMockup && (
             <div style={{ width:"100%", maxWidth:"720px", margin:"0 auto", background:"#fff", flex:1 }}>
               {currentHero && (
                 <div style={{ overflow:"hidden", position:"relative" }} ref={heroOverlayRef}>
-                  <iframe key={`${devMode}-${currentHero.height}`} srcDoc={buildHeroHtml(currentHero)} sandbox="allow-scripts" scrolling="no"
+                  <iframe key={`${devMode}-${currentHero.height}`} srcDoc={buildHeroHtml(currentHero)} sandbox="allow-scripts allow-same-origin" scrolling="no"
                     onLoad={e=>{try{const d=e.target.contentDocument;const h=d?.documentElement?.scrollHeight||d?.body?.scrollHeight;if(h)e.target.style.height=h+"px";}catch{}}}
                     style={{ border:"none", width:"100%", minHeight:currentHero.height==="100vh"?"100vh":(currentHero.height||"500px"), display:"block", overflow:"hidden" }} />
                   <style>{`.hero-zone{position:absolute;cursor:pointer;border:2px solid transparent;border-radius:6px;transition:border-color .15s,background .15s}.hero-zone:hover{border-color:#7c3aed88;background:rgba(124,58,237,.08)}.hero-zone:hover .hero-zone-tip{display:flex}.hero-zone-tip{display:none;position:absolute;top:-26px;left:0;background:#7c3aed;color:#fff;font-size:10px;font-weight:700;padding:3px 8px;border-radius:4px;white-space:nowrap;z-index:10;align-items:center;gap:4px;pointer-events:none}`}</style>
