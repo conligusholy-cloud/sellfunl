@@ -79,7 +79,7 @@ exports.createConnectOnboarding = onCall(
     }
 
     const isDev = process.env.FUNCTIONS_EMULATOR === "true";
-    const baseUrl = isDev ? "http://localhost:5173" : "https://selffunl.cz";
+    const baseUrl = isDev ? "http://localhost:5173" : "https://sellfunl.cz";
     const accountLink = await stripe.accountLinks.create({
       account: stripeAccountId,
       refresh_url: `${baseUrl}/dashboard`,
@@ -102,7 +102,53 @@ exports.getConnectStatus = onCall(
     if (!stripeAccountId) return { connected: false };
     const stripe = Stripe(STRIPE_SECRET.value());
     const account = await stripe.accounts.retrieve(stripeAccountId);
-    return { connected: account.charges_enabled, payoutsEnabled: account.payouts_enabled, detailsSubmitted: account.details_submitted };
+    return {
+      connected: account.charges_enabled,
+      payoutsEnabled: account.payouts_enabled,
+      detailsSubmitted: account.details_submitted,
+    };
+  }
+);
+
+// ─── STRIPE: vytvoř Checkout Session přes Connect účet ─────────────────────
+exports.createCheckoutSession = onCall(
+  { secrets: [STRIPE_SECRET], region: "us-central1" },
+  async (request) => {
+    if (!request.auth) throw new HttpsError("unauthenticated", "Musíš být přihlášen.");
+
+    const { pageId, productName, priceAmount, currency = "czk", successUrl, cancelUrl } = request.data;
+    if (!productName || !priceAmount) throw new HttpsError("invalid-argument", "Chybí název produktu nebo cena.");
+
+    const uid = request.auth.uid;
+    const db = admin.firestore();
+    const stripe = Stripe(STRIPE_SECRET.value());
+
+    const userDoc = await db.collection("users").doc(uid).get();
+    const stripeAccountId = userDoc.data()?.stripeAccountId;
+    if (!stripeAccountId) throw new HttpsError("failed-precondition", "Stripe účet není propojený.");
+
+    const isDev = process.env.FUNCTIONS_EMULATOR === "true";
+    const baseUrl = isDev ? "http://localhost:5173" : "https://sellfunl.cz";
+
+    const session = await stripe.checkout.sessions.create(
+      {
+        mode: "payment",
+        line_items: [{
+          price_data: {
+            currency,
+            unit_amount: Math.round(priceAmount * 100),
+            product_data: { name: productName },
+          },
+          quantity: 1,
+        }],
+        success_url: successUrl || `${baseUrl}/p/${pageId}?payment=success`,
+        cancel_url:  cancelUrl  || `${baseUrl}/p/${pageId}?payment=cancelled`,
+        metadata: { pageId: pageId || "", uid },
+      },
+      { stripeAccount: stripeAccountId }
+    );
+
+    return { url: session.url };
   }
 );
 
@@ -147,7 +193,6 @@ exports.addDomain = onCall(
     const accountId = CF_ACCOUNT_ID.value();
     const headers   = { "Authorization": `Bearer ${token}`, "Content-Type": "application/json" };
 
-    // 1. Přidej doménu (zone) do Cloudflare
     const zoneRes = await fetch("https://api.cloudflare.com/client/v4/zones", {
       method: "POST", headers,
       body: JSON.stringify({ name: domain, account: { id: accountId }, jump_start: true }),
@@ -159,7 +204,6 @@ exports.addDomain = onCall(
       if (!alreadyExists) throw new HttpsError("internal", `Cloudflare error: ${zoneData.errors?.[0]?.message}`);
     }
 
-    // Získej zone ID
     let zoneId = zoneData.result?.id;
     if (!zoneId) {
       const listRes = await fetch(`https://api.cloudflare.com/client/v4/zones?name=${domain}`, { headers });
@@ -168,7 +212,6 @@ exports.addDomain = onCall(
     }
     if (!zoneId) throw new HttpsError("internal", "Nepodařilo se získat Zone ID.");
 
-    // 2. Nasaď Worker skript
     const workerScript = `addEventListener('fetch', event => {
   event.respondWith(handleRequest(event.request))
 })
@@ -192,13 +235,11 @@ async function handleRequest(request) {
     const workerData = await workerRes.json();
     if (!workerData.success) throw new HttpsError("internal", `Worker error: ${workerData.errors?.[0]?.message}`);
 
-    // 3. Připoj Worker k doméně
     await fetch(`https://api.cloudflare.com/client/v4/zones/${zoneId}/workers/routes`, {
       method: "POST", headers,
       body: JSON.stringify({ pattern: `${domain}/*`, script: "sellfunl-router" }),
     });
 
-    // 4. Získej nameservery pro zákazníka
     const nsRes = await fetch(`https://api.cloudflare.com/client/v4/zones/${zoneId}`, { headers });
     const nsData = await nsRes.json();
     const nameservers = nsData.result?.name_servers || [];

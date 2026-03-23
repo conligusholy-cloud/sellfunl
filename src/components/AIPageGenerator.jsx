@@ -21,7 +21,6 @@ Přesně tento formát:
   "subline": "podnadpis max 15 slov",
   "text": "<h2>Nadpis sekce</h2><p>Text odstavce s <strong>důrazem</strong> a emoji 🔥</p><ul><li>benefit 1</li><li>benefit 2</li><li>benefit 3</li></ul><h2>Proč zvolit nás?</h2><p>Další text...</p><blockquote>Citát zákazníka - Jan N.</blockquote>",
   "btnText": "CTA text max 5 slov 🔥",
-  "price": "cena např 1990 Kč",
   "hero": {
     "badgeText": "⚡ badge text max 4 slova",
     "h1Line1": "jedno až dvě slova",
@@ -55,7 +54,6 @@ export default function AIPageGenerator({ lang = "cs", onGenerated, onClose }) {
 
       console.log("AIPageGenerator — raw odpověď:", raw);
 
-      // Bezpečné parsování — odstraní markdown i okolní text
       let parsed;
       const jsonMatch = raw.match(/\{[\s\S]*\}/);
       if (!jsonMatch) throw new Error("AI nevrátila JSON.");
@@ -63,27 +61,20 @@ export default function AIPageGenerator({ lang = "cs", onGenerated, onClose }) {
       try {
         parsed = JSON.parse(jsonMatch[0]);
       } catch {
-        // Pokus o opravu nekompletního JSON
         const fixed = jsonMatch[0]
           .replace(/,\s*"[^"]*":\s*"[^"]*$/, "")
           .replace(/,?\s*$/, "") + "}}";
         parsed = JSON.parse(fixed);
       }
 
-      console.log("AIPageGenerator — parsed:", parsed);
-      console.log("AIPageGenerator — hero:", parsed.hero);
-
-      // Sestavení dat pro stránku
       const pageData = {
         name:    parsed.name     || "",
         headline:parsed.headline || "",
         subline: parsed.subline  || "",
         text:    parsed.text     || "",
         btnText: parsed.btnText  || "",
-        price:   parsed.price    || "",
       };
 
-      // Sestavení dat pro Hero sekci
       let heroData = null;
       if (parsed.hero && typeof parsed.hero === "object") {
         const h = parsed.hero;
@@ -102,7 +93,6 @@ export default function AIPageGenerator({ lang = "cs", onGenerated, onClose }) {
           btn2Text:  h.btn2Text || "▶ Zjistit více",
         };
       } else {
-        // Fallback — vytvoř hero z headline pokud AI hero nevrátila
         const words = (parsed.headline || "").split(" ");
         const third = Math.ceil(words.length / 3);
         heroData = {
@@ -120,8 +110,6 @@ export default function AIPageGenerator({ lang = "cs", onGenerated, onClose }) {
           btn2Text:  "▶ Zjistit více",
         };
       }
-
-      console.log("AIPageGenerator — heroData výsledek:", heroData);
 
       setDone(true);
       onGenerated({ page: pageData, hero: heroData });
@@ -143,7 +131,6 @@ export default function AIPageGenerator({ lang = "cs", onGenerated, onClose }) {
   return (
     <div style={{ background:"linear-gradient(135deg,#f5f3ff,#ede9fe)", border:"1px solid #c4b5fd", borderRadius:"12px", padding:"16px", marginBottom:"12px" }}>
 
-      {/* Hlavička */}
       <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:"12px" }}>
         <div style={{ display:"flex", alignItems:"center", gap:"7px" }}>
           <span style={{ fontSize:"18px" }}>✨</span>
@@ -155,35 +142,30 @@ export default function AIPageGenerator({ lang = "cs", onGenerated, onClose }) {
         <button onClick={onClose} style={{ background:"none", border:"none", cursor:"pointer", color:"#a78bfa", fontSize:"18px", lineHeight:1 }}>✕</button>
       </div>
 
-      {/* Jazyk */}
       <div style={{ fontSize:".72rem", color:"#7c3aed", marginBottom:"8px", fontWeight:600 }}>
         Generuje v jazyce: <strong>{langName}</strong>
       </div>
 
-      {/* Textarea */}
       <textarea
         value={topic}
         onChange={e => { setTopic(e.target.value); setError(""); setDone(false); }}
-        placeholder={"Popiš produkt nebo téma...\nNapr: automatická pračka PrádloMat, pere suší a skládá prádlo, cena 29 990 Kč"}
+        placeholder="Popiš produkt nebo téma..."
         rows={3}
         style={{ ...S.input, resize:"vertical", minHeight:"72px", marginBottom:"8px" }}
       />
 
-      {/* Chyba */}
       {error && (
         <div style={{ padding:"7px 10px", background:"#fee2e2", border:"1px solid #fca5a5", borderRadius:"7px", fontSize:".8rem", color:"#b91c1c", marginBottom:"8px" }}>
           ⚠️ {error}
         </div>
       )}
 
-      {/* Úspěch */}
       {done && !error && (
         <div style={{ padding:"7px 10px", background:"#d1fae5", border:"1px solid #6ee7b7", borderRadius:"7px", fontSize:".8rem", color:"#065f46", marginBottom:"8px" }}>
           ✅ Stránka vygenerována — Hero sekce, obsah i CTA jsou nastaveny!
         </div>
       )}
 
-      {/* Progress bar */}
       {loading && (
         <>
           <div style={{ height:"3px", background:"#ddd6fe", borderRadius:"2px", marginBottom:"8px", overflow:"hidden" }}>
@@ -191,14 +173,13 @@ export default function AIPageGenerator({ lang = "cs", onGenerated, onClose }) {
             <style>{`@keyframes aiProg{from{width:10%;margin-left:0}to{width:60%;margin-left:40%}}`}</style>
           </div>
           <div style={{ display:"flex", gap:"5px", flexWrap:"wrap", marginBottom:"8px" }}>
-            {["🏠 Hero sekce", "📝 Nadpisy", "📄 Obsah", "🔘 CTA tlačítka"].map((s, i) => (
+            {["🏠 Hero sekce","📝 Nadpisy","📄 Obsah","🔘 CTA tlačítka"].map((s,i) => (
               <span key={i} style={{ fontSize:".7rem", padding:"2px 8px", borderRadius:"10px", background:"#ede9fe", color:"#7c3aed", fontWeight:600 }}>{s}</span>
             ))}
           </div>
         </>
       )}
 
-      {/* Tlačítka */}
       <div style={{ display:"flex", gap:"8px", justifyContent:"flex-end" }}>
         <button style={S.btnOut} onClick={onClose} disabled={loading}>Zrušit</button>
         <button style={S.btnPrim} onClick={handleGenerate} disabled={loading || !topic.trim()}>

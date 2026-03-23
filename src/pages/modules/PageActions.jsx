@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { collection, getDocs, query, where } from "firebase/firestore";
-import { db } from "../../firebase/config";
+import { db, app } from "../../firebase/config";
+import { getFunctions, httpsCallable } from "firebase/functions";
 
 const FORM_FIELD_OPTIONS = ["Jméno", "Email", "Telefon", "Firma", "Zpráva", "Souhlas GDPR"];
 
@@ -45,6 +46,17 @@ export default function PageActions({ page, update, formFields, setFormFields, u
   const [afterPayment,   setAfterPayment]   = useState("email");
   const [intMC, setIntMC] = useState(false); const [mcKey, setMcKey] = useState(""); const [mcAud, setMcAud] = useState("");
   const [intAC, setIntAC] = useState(false); const [acUrl, setAcUrl] = useState(""); const [acKey, setAcKey] = useState("");
+
+  // Stripe
+  const [stripeMode,   setStripeMode]   = useState(page.stripeMode || "none");
+  const [stripeStatus, setStripeStatus] = useState(null); // null | "connected" | "disconnected"
+
+  useEffect(() => {
+    if (!userId) return;
+    const fn = httpsCallable(getFunctions(app), "getConnectStatus");
+    fn().then(res => setStripeStatus(res.data.connected ? "connected" : "disconnected"))
+       .catch(() => setStripeStatus("disconnected"));
+  }, [userId]);
 
   useEffect(() => {
     if (!userId || domainLoaded) return;
@@ -96,6 +108,76 @@ export default function PageActions({ page, update, formFields, setFormFields, u
         )}
       </div>
 
+      {/* ── Stripe platební brána ── */}
+      <div style={{ ...S.card, marginBottom:"12px", border:"1px solid #c4b5fd" }}>
+        <div style={{ display:"flex", alignItems:"center", gap:"8px", marginBottom:"10px" }}>
+          <span style={{ fontSize:"18px" }}>💳</span>
+          <div style={{ flex:1 }}>
+            <div style={{ fontSize:".85rem", fontWeight:700, color:"#7c3aed" }}>Stripe platební brána</div>
+            <div style={{ fontSize:".72rem", color:"#a78bfa" }}>Platba přes tvůj Stripe Connect účet</div>
+          </div>
+          {stripeStatus === null && (
+            <span style={{ fontSize:".72rem", color:"var(--text-muted)" }}>⏳ Načítám...</span>
+          )}
+          {stripeStatus === "connected" && (
+            <span style={{ padding:"2px 8px", borderRadius:"20px", background:"#d1fae5", color:"#065f46", fontSize:".72rem", fontWeight:600 }}>✓ Připojeno</span>
+          )}
+          {stripeStatus === "disconnected" && (
+            <a href="/dashboard" style={{ padding:"2px 8px", borderRadius:"20px", background:"#fef3c7", color:"#92400e", fontSize:".72rem", fontWeight:600, textDecoration:"none" }}>⚠ Připojit Stripe</a>
+          )}
+        </div>
+
+        {stripeStatus === "disconnected" && (
+          <div style={{ padding:"8px 10px", background:"#fef3c7", border:"1px solid #fcd34d", borderRadius:"7px", fontSize:".78rem", color:"#92400e", marginBottom:"10px" }}>
+            Pro přijímání plateb nejprve <a href="/dashboard" style={{ color:"#92400e", fontWeight:700 }}>připoj Stripe účet →</a>
+          </div>
+        )}
+
+        <Toggle
+          on={stripeMode === "checkout"}
+          onToggle={() => {
+            const next = stripeMode === "checkout" ? "none" : "checkout";
+            setStripeMode(next);
+            update("stripeMode", next);
+          }}
+          label="Aktivovat platební bránu"
+        />
+
+        {stripeMode === "checkout" && (
+          <div style={{ marginTop:"10px", display:"flex", flexDirection:"column", gap:"8px" }}>
+            <div>
+              <label style={S.lbl}>Název produktu</label>
+              <input
+                value={page.stripeProductName || ""}
+                onChange={e => update("stripeProductName", e.target.value)}
+                placeholder="např. Online kurz, E-book..."
+                style={S.input}
+              />
+            </div>
+            <div>
+              <label style={S.lbl}>Cena (v Kč)</label>
+              <input
+                type="number"
+                min="1"
+                value={page.stripePriceAmount || ""}
+                onChange={e => update("stripePriceAmount", Number(e.target.value))}
+                placeholder="např. 1990"
+                style={S.input}
+              />
+            </div>
+            {page.stripeProductName && page.stripePriceAmount ? (
+              <div style={{ padding:"8px 10px", background:"#d1fae5", border:"1px solid #6ee7b7", borderRadius:"7px", fontSize:".78rem", color:"#065f46" }}>
+                ✅ Zákazník zaplatí <strong>{page.stripePriceAmount} Kč</strong> za „{page.stripeProductName}" — peníze jdou přímo na tvůj Stripe účet.
+              </div>
+            ) : (
+              <div style={{ padding:"8px 10px", background:"#f5f3ff", border:"1px solid #ede9fe", borderRadius:"7px", fontSize:".78rem", color:"#7c3aed" }}>
+                💡 Vyplň název produktu a cenu — tlačítko automaticky spustí Stripe Checkout.
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
       {/* ── Typ produktu ── */}
       <div style={{ ...S.card, marginBottom:"12px" }}>
         <span style={{ ...S.lbl, marginBottom:"8px" }}>📦 Typ produktu</span>
@@ -141,7 +223,7 @@ export default function PageActions({ page, update, formFields, setFormFields, u
 
       <hr style={S.divider} />
 
-      {/* ── Výstupy ── */}
+      {/* ── Výstupy po odeslání ── */}
       <span style={S.lbl}>Výstupy po odeslání</span>
       <p style={{ fontSize:".78rem", color:"var(--text-muted)", marginBottom:"10px" }}>Konkrétní URL nastavíš ve funnelu.</p>
       <div style={S.card}>
@@ -170,22 +252,45 @@ export default function PageActions({ page, update, formFields, setFormFields, u
       {/* ── Integrace emailingu ── */}
       <span style={S.lbl}>Integrace emailingu</span>
       <Toggle on={intMC} onToggle={()=>setIntMC(v=>!v)} label="Mailchimp" />
-      {intMC && <div style={{ ...S.card, marginBottom:"10px" }}>
-        <label style={S.lbl}>API klíč</label><input placeholder="mc-xxxxxxxx" value={mcKey} onChange={e=>setMcKey(e.target.value)} style={{ ...S.input, marginBottom:"7px" }} />
-        <label style={S.lbl}>Audience ID</label><input placeholder="abc12345" value={mcAud} onChange={e=>setMcAud(e.target.value)} style={S.input} />
-      </div>}
+      {intMC && (
+        <div style={{ ...S.card, marginBottom:"10px" }}>
+          <label style={S.lbl}>API klíč</label>
+          <input placeholder="mc-xxxxxxxx" value={mcKey} onChange={e=>setMcKey(e.target.value)} style={{ ...S.input, marginBottom:"7px" }} />
+          <label style={S.lbl}>Audience ID</label>
+          <input placeholder="abc12345" value={mcAud} onChange={e=>setMcAud(e.target.value)} style={S.input} />
+        </div>
+      )}
       <Toggle on={intAC} onToggle={()=>setIntAC(v=>!v)} label="ActiveCampaign" />
-      {intAC && <div style={{ ...S.card, marginBottom:"10px" }}>
-        <label style={S.lbl}>API URL</label><input placeholder="https://account.api-us1.com" value={acUrl} onChange={e=>setAcUrl(e.target.value)} style={{ ...S.input, marginBottom:"7px" }} />
-        <label style={S.lbl}>API klíč</label><input placeholder="xxxxxxxxxxxxxxxx" value={acKey} onChange={e=>setAcKey(e.target.value)} style={S.input} />
-      </div>}
+      {intAC && (
+        <div style={{ ...S.card, marginBottom:"10px" }}>
+          <label style={S.lbl}>API URL</label>
+          <input placeholder="https://account.api-us1.com" value={acUrl} onChange={e=>setAcUrl(e.target.value)} style={{ ...S.input, marginBottom:"7px" }} />
+          <label style={S.lbl}>API klíč</label>
+          <input placeholder="xxxxxxxxxxxxxxxx" value={acKey} onChange={e=>setAcKey(e.target.value)} style={S.input} />
+        </div>
+      )}
 
       <hr style={S.divider} />
 
       {/* ── CTA ── */}
-      <FieldInput label="Text tlačítka"  value={page.btnText} onChange={v=>update("btnText",v)} placeholder="např. Chci produkt nyní 🔥" />
-      <FieldInput label="Odkaz tlačítka" value={page.btnUrl}  onChange={v=>update("btnUrl",v)}  placeholder="https://..." />
-      <FieldInput label="Cena"           value={page.price}   onChange={v=>update("price",v)}   placeholder="např. 1 990 Kč" />
+      <FieldInput label="Text tlačítka" value={page.btnText} onChange={v=>update("btnText",v)} placeholder="např. Chci produkt nyní 🔥" />
+
+      {/* Odkaz tlačítka — jen pokud není Stripe aktivní */}
+      {stripeMode === "none" && (
+        <FieldInput label="Odkaz tlačítka" value={page.btnUrl} onChange={v=>update("btnUrl",v)} placeholder="https://..." />
+      )}
+      {stripeMode === "checkout" && page.stripeProductName && page.stripePriceAmount && (
+        <div style={{ marginBottom:"13px" }}>
+          <label style={{ ...S.lbl, display:"block", marginBottom:"5px" }}>Odkaz tlačítka</label>
+          <div style={{ padding:"8px 11px", border:"1px solid #c4b5fd", borderRadius:"8px", background:"#f5f3ff", fontSize:".85rem", color:"#7c3aed", fontWeight:500, display:"flex", alignItems:"center", gap:"6px" }}>
+            💳 Stripe Checkout — {page.stripeProductName} · {page.stripePriceAmount} Kč
+          </div>
+          <p style={{ fontSize:".72rem", color:"var(--text-muted)", marginTop:"4px" }}>Automaticky spustí platební bránu po kliknutí</p>
+        </div>
+      )}
+
+      <FieldInput label="Cena (zobrazená na stránce)" value={page.price} onChange={v=>update("price",v)} placeholder="např. 1 990 Kč" />
+
     </div>
   );
 }
