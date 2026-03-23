@@ -11,10 +11,11 @@ import Pages         from "./pages/modules/Pages";
 import PageEditor    from "./pages/modules/PageEditor";
 import PublicPage    from "./pages/PublicPage";
 import Domains       from "./pages/Domains";
+import FacebookAds   from "./pages/modules/FacebookAds";
+import FacebookCallback from "./pages/modules/FacebookCallback";
 
 // Komponenty
 import PrivateRoute  from "./components/PrivateRoute";
-import AIAssistant   from "./components/AIAssistant";
 
 export default function App() {
   const { user, loading } = useAuthState();
@@ -35,18 +36,22 @@ export default function App() {
 
         {/* Chráněné stránky (vyžadují přihlášení) */}
         <Route element={<PrivateRoute user={user} />}>
-          <Route path="/dashboard"  element={<Dashboard />} />
-          <Route path="/pages"      element={<Pages />} />
-          <Route path="/editor/:id" element={<PageEditor />} />
-          <Route path="/domains"    element={<Domains />} />
+          {/* Dashboard jako layout — sidebar + header na všech podstránkách */}
+          <Route element={<Dashboard />}>
+            <Route path="/dashboard"  element={<></>} />
+            <Route path="/pages"      element={<Pages />} />
+            <Route path="/editor/:id" element={<PageEditor />} />
+            <Route path="/domains"    element={<Domains />} />
+            <Route path="/fb-ads"     element={<FacebookAds />} />
+          </Route>
+          {/* Callback je popup — bez sidebaru */}
+          <Route path="/fb-ads/callback" element={<FacebookCallback />} />
         </Route>
 
         {/* Výchozí přesměrování */}
         <Route path="*" element={<Navigate to={user ? "/dashboard" : "/login"} />} />
       </Routes>
 
-      {/* AI asistent — zobrazí se jen přihlášeným uživatelům */}
-      {user && <AIAssistant />}
     </BrowserRouter>
   );
 }

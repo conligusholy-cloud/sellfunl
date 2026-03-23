@@ -4,12 +4,14 @@ import { auth } from "../firebase/config";
 import { useNavigate, useLocation, Outlet } from "react-router-dom";
 import { useAuthState } from "../hooks/useAuthState";
 import StripeConnect from "../components/StripeConnect";
+import AIAssistant from "../components/AIAssistant";
 import logo from "../assets/logo.svg";
 
 const menuItems = [
-  { icon: "🏠", label: "Přehled", path: "/dashboard" },
-  { icon: "📄", label: "Stránky", path: "/pages" },
-  { icon: "🌐", label: "Domény",  path: "/domains" },
+  { icon: "🏠", label: "Přehled",    path: "/dashboard" },
+  { icon: "📄", label: "Stránky",    path: "/pages" },
+  { icon: "🌐", label: "Domény",     path: "/domains" },
+  { icon: "📣", label: "FB reklamy", path: "/fb-ads" },
 ];
 
 export default function Dashboard() {
@@ -164,6 +166,7 @@ export default function Dashboard() {
           <Outlet />
         </main>
       </div>
+      <AIAssistant />
     </div>
   );
 }

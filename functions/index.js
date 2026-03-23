@@ -9,6 +9,8 @@ const STRIPE_SECRET   = defineSecret("STRIPE_SECRET_KEY");
 const WEBHOOK_SECRET  = defineSecret("STRIPE_WEBHOOK_SECRET");
 const CF_API_TOKEN    = defineSecret("CLOUDFLARE_API_TOKEN");
 const CF_ACCOUNT_ID   = defineSecret("CLOUDFLARE_ACCOUNT_ID");
+const FB_APP_ID       = defineSecret("FACEBOOK_APP_ID");
+const FB_APP_SECRET   = defineSecret("FACEBOOK_APP_SECRET");
 
 // ─── PŘEKLAD ───────────────────────────────────────────────────────────────
 exports.translate = onCall(
@@ -250,7 +252,26 @@ async function handleRequest(request) {
 
 // ─── CLOUDFLARE: resolve stránky podle domény a slugu ─────────────────────
 exports.resolvePageByDomain = onRequest(async (req, res) => {
-  res.set("Access-Control-Allow-Origin", "*");
+  // Povolit requesty pouze z vlastních domén a Cloudflare Workers
+  const allowedOrigins = [
+    "https://sellfunl.cz",
+    "https://www.sellfunl.cz",
+    "https://sellfunl.web.app",
+    "https://sellfunl.firebaseapp.com",
+  ];
+  const origin = req.headers.origin || "";
+  if (allowedOrigins.includes(origin)) {
+    res.set("Access-Control-Allow-Origin", origin);
+  }
+  // Cloudflare Workers nemají origin — povolíme requesty bez origin headeru
+  // (přicházejí server-to-server), ale blokujeme cizí originy z prohlížečů
+
+  if (req.method === "OPTIONS") {
+    res.set("Access-Control-Allow-Methods", "GET");
+    res.set("Access-Control-Max-Age", "3600");
+    return res.status(204).send("");
+  }
+
   const domain = req.query.domain;
   const slug   = req.query.slug || "";
 
@@ -267,3 +288,111 @@ exports.resolvePageByDomain = onRequest(async (req, res) => {
   if (snap.empty) return res.status(404).json({ error: "Stránka nenalezena." });
   return res.json({ pageId: snap.docs[0].id });
 });
+
+// ─── FACEBOOK: vytvoř OAuth link ────────────────────────────────────────────
+exports.facebookCreateConnectLink = onCall(
+  { secrets: [FB_APP_ID] },
+  async (request) => {
+    if (!request.auth) throw new HttpsError("unauthenticated", "Musíš být přihlášen.");
+
+    const uid = request.auth.uid;
+    const appId = FB_APP_ID.value();
+
+    // Ulož state token pro ověření callbacku
+    const stateToken = `fb_${uid}_${Date.now()}`;
+    const db = admin.firestore();
+    await db.collection("fbOAuthState").doc(stateToken).set({
+      userId: uid,
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+
+    const isDev = process.env.FUNCTIONS_EMULATOR === "true";
+    const redirectUri = isDev
+      ? "http://localhost:5173/fb-ads/callback"
+      : "https://sellfunl.web.app/fb-ads/callback";
+
+    const scopes = [
+      "ads_management",
+      "ads_read",
+      "pages_show_list",
+      "business_management",
+    ].join(",");
+
+    const url = `https://www.facebook.com/v19.0/dialog/oauth?client_id=${appId}&redirect_uri=${encodeURIComponent(redirectUri)}&state=${stateToken}&scope=${scopes}&response_type=code`;
+
+    return { url };
+  }
+);
+
+// ─── FACEBOOK: vyměň code za access token ───────────────────────────────────
+exports.facebookExchangeToken = onCall(
+  { secrets: [FB_APP_ID, FB_APP_SECRET] },
+  async (request) => {
+    if (!request.auth) throw new HttpsError("unauthenticated", "Musíš být přihlášen.");
+
+    const { code, state } = request.data;
+    if (!code || !state) throw new HttpsError("invalid-argument", "Chybí code nebo state.");
+
+    const uid = request.auth.uid;
+    const db = admin.firestore();
+
+    // Ověř state token
+    const stateDoc = await db.collection("fbOAuthState").doc(state).get();
+    if (!stateDoc.exists() || stateDoc.data().userId !== uid) {
+      throw new HttpsError("permission-denied", "Neplatný OAuth state.");
+    }
+    // Smaž state token (jednorázový)
+    await db.collection("fbOAuthState").doc(state).delete();
+
+    const appId = FB_APP_ID.value();
+    const appSecret = FB_APP_SECRET.value();
+
+    const isDev = process.env.FUNCTIONS_EMULATOR === "true";
+    const redirectUri = isDev
+      ? "http://localhost:5173/fb-ads/callback"
+      : "https://sellfunl.web.app/fb-ads/callback";
+
+    // Vyměň code za short-lived token
+    const tokenRes = await fetch(
+      `https://graph.facebook.com/v19.0/oauth/access_token?client_id=${appId}&redirect_uri=${encodeURIComponent(redirectUri)}&client_secret=${appSecret}&code=${code}`
+    );
+    const tokenData = await tokenRes.json();
+    if (tokenData.error) {
+      throw new HttpsError("internal", `Facebook token error: ${tokenData.error.message}`);
+    }
+
+    // Vyměň za long-lived token (60 dní)
+    const longTokenRes = await fetch(
+      `https://graph.facebook.com/v19.0/oauth/access_token?grant_type=fb_exchange_token&client_id=${appId}&client_secret=${appSecret}&fb_exchange_token=${tokenData.access_token}`
+    );
+    const longTokenData = await longTokenRes.json();
+    const accessToken = longTokenData.access_token || tokenData.access_token;
+
+    // Získej info o uživateli a reklamních účtech
+    const meRes = await fetch(
+      `https://graph.facebook.com/v19.0/me?fields=id,name&access_token=${accessToken}`
+    );
+    const meData = await meRes.json();
+
+    // Získej reklamní účty
+    const adAccountsRes = await fetch(
+      `https://graph.facebook.com/v19.0/me/adaccounts?fields=id,name,account_status,currency&access_token=${accessToken}`
+    );
+    const adAccountsData = await adAccountsRes.json();
+
+    // Ulož do Firestore
+    await db.collection("facebookAccounts").doc(uid).set({
+      accessToken,
+      tokenExpiry: longTokenData.expires_in
+        ? admin.firestore.Timestamp.fromDate(new Date(Date.now() + longTokenData.expires_in * 1000))
+        : null,
+      fbUserId: meData.id,
+      accountName: meData.name,
+      adAccounts: adAccountsData.data || [],
+      connectedAt: admin.firestore.FieldValue.serverTimestamp(),
+      status: "connected",
+    });
+
+    return { success: true, name: meData.name };
+  }
+);
