@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { httpsCallable, getFunctions } from "firebase/functions";
-import { onAuthStateChanged } from "firebase/auth";
 import { auth } from "../../firebase/config";
 
 const functions = getFunctions();
@@ -17,21 +16,17 @@ export default function FacebookCallback() {
   const [message, setMessage] = useState("Propojuji s Facebookem…");
 
   useEffect(() => {
-    // Počkej na inicializaci Firebase Auth (uživatel může být přihlášený)
-    const unsub = onAuthStateChanged(auth, (user) => {
-      unsub(); // Stačí nám první emise
+    async function run() {
+      // Počkej až Firebase Auth obnoví session z IndexedDB
+      await auth.authStateReady();
 
-      if (!user) {
+      if (!auth.currentUser) {
         setStatus("error");
         setMessage("Nejsi přihlášen. Zavři toto okno a zkus to znovu.");
         setTimeout(() => window.close(), 3000);
         return;
       }
 
-      exchangeToken();
-    });
-
-    async function exchangeToken() {
       const code = searchParams.get("code");
       const state = searchParams.get("state");
       const error = searchParams.get("error");
@@ -56,8 +51,6 @@ export default function FacebookCallback() {
 
         setStatus("success");
         setMessage(`Propojeno jako ${data.name || "Facebook účet"}`);
-
-        // Zavři popup okno po 1.5s
         setTimeout(() => window.close(), 1500);
       } catch (err) {
         console.error("FB token exchange error:", err);
@@ -66,6 +59,8 @@ export default function FacebookCallback() {
         setTimeout(() => window.close(), 3000);
       }
     }
+
+    run();
   }, [searchParams]);
 
   return (
