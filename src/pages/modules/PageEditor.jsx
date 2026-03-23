@@ -377,31 +377,27 @@ function HeroClickMenu({ hero, onSelect }) {
   function handleSelect(item) {
     setOpen(false);
     setFlash(item.label);
-    setTimeout(() => setFlash(null), 1200);
+    setTimeout(() => setFlash(null), 1500);
     onSelect(item.field);
   }
 
   return (
     <>
-      {/* Flash overlay — žluté zvýraznění přes hero */}
+      {/* Malý toast banner — jen dole na hero, ne celý overlay */}
       {flash && (
         <div style={{
-          position:"absolute", inset:0, zIndex:15,
-          background:"rgba(254,240,138,0.35)",
-          border:"2px solid #eab308",
-          borderRadius:"6px",
-          pointerEvents:"none",
-          display:"flex", alignItems:"center", justifyContent:"center",
-          animation:"heroFlash .3s ease",
+          position:"absolute", bottom:"10px", left:"50%",
+          transform:"translateX(-50%)",
+          zIndex:15, pointerEvents:"none",
+          background:"#eab308", color:"#1a1a1a",
+          fontSize:"12px", fontWeight:700,
+          padding:"5px 14px", borderRadius:"20px",
+          boxShadow:"0 2px 8px rgba(0,0,0,.25)",
+          whiteSpace:"nowrap",
+          animation:"heroFlash .25s ease",
         }}>
-          <style>{`@keyframes heroFlash{from{opacity:0}to{opacity:1}}`}</style>
-          <div style={{
-            background:"#eab308", color:"#1a1a1a", fontSize:"12px", fontWeight:700,
-            padding:"5px 14px", borderRadius:"20px",
-            boxShadow:"0 2px 8px rgba(0,0,0,.2)",
-          }}>
-            ✏️ {flash}
-          </div>
+          <style>{`@keyframes heroFlash{from{opacity:0;transform:translateX(-50%) translateY(6px)}to{opacity:1;transform:translateX(-50%) translateY(0)}}`}</style>
+          ✏️ {flash} — upravuji v panelu vlevo
         </div>
       )}
 
