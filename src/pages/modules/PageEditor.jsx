@@ -572,6 +572,8 @@ export default function PageEditor() {
   // (bg, bgCustom, bgCustom2, accentCustom, overlay, layout, height,
   //  showMedia, mediaPos, mediaStyle, mediaSize, mediaRatio, bgAnim)
 
+  const currentHero = heroes[devMode] || heroes["full"] || DEFAULT_HERO;
+
   // Klíč pro force-refresh hero iframe při změně textu
   const heroKey = `${devMode}-${currentHero?.height}-${currentHero?.badgeText}-${currentHero?.h1Line1}-${currentHero?.h1Accent}-${currentHero?.h1Line2}-${currentHero?.subText}-${currentHero?.btn1Text}-${currentHero?.btn2Text}`;
   const isMobile = window.innerWidth < 768;
