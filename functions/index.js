@@ -1,4 +1,12 @@
-const { onCall, HttpsError } = require("firebase-functions/v2/https");
+const { onCall, onRequest, HttpsError } = require("firebase-functions/v2/https");
+const { defineSecret } = require("firebase-functions/params");
+const admin = require("firebase-admin");
+const Stripe = require("stripe");
+
+admin.initializeApp();
+
+const STRIPE_SECRET = defineSecret("STRIPE_SECRET_KEY");
+const WEBHOOK_SECRET = defineSecret("STRIPE_WEBHOOK_SECRET");
 
 // ─── PŘEKLAD ───────────────────────────────────────────────────────────────
 exports.translate = onCall(
@@ -39,13 +47,12 @@ exports.translate = onCall(
 exports.generateContent = onCall(
   { region: "us-central1", timeoutSeconds: 120, secrets: ["ANTHROPIC_API_KEY"] },
   async (request) => {
-    const { topic, pageTitle, section, fields, max_tokens = 4000 } = request.data;
+    const { topic, pageTitle, section, max_tokens = 4000 } = request.data;
 
     if (!topic) {
       throw new HttpsError("invalid-argument", "Chybí popis produktu/tématu.");
     }
 
-    // Sestavení promptu podle sekce (hero / obsah stránky)
     let prompt = "";
 
     if (section === "hero") {
@@ -92,7 +99,6 @@ Vygeneruj jako JSON objekt (bez markdown, jen čistý JSON):
 Buď konkrétní, prodejní, používej emoji. Piš ve stejném jazyce jako téma.
       `;
     } else {
-      // Obecný generátor
       prompt = `
 Jsi expert na copywriting.
 Produkt / téma: ${topic}
@@ -126,12 +132,117 @@ Použij emoji. Odpověz jako JSON: { "text": "vygenerovaný obsah" }
     const data = await response.json();
     const rawText = data.content?.[0]?.text || "";
 
-    // Bezpečné parsování JSON odpovědi
     try {
       const parsed = JSON.parse(rawText);
       return { result: parsed };
     } catch {
       return { result: { text: rawText } };
     }
+  }
+);
+
+// ─── STRIPE CONNECT: vytvoř Express účet + onboarding URL ──────────────────
+exports.createConnectOnboarding = onCall(
+  { secrets: [STRIPE_SECRET] },
+  async (request) => {
+    if (!request.auth) throw new HttpsError("unauthenticated", "Musíš být přihlášen.");
+
+    const uid = request.auth.uid;
+    const stripe = Stripe(STRIPE_SECRET.value());
+    const db = admin.firestore();
+    const userRef = db.collection("users").doc(uid);
+    const userDoc = await userRef.get();
+
+    let stripeAccountId = userDoc.data()?.stripeAccountId;
+
+    if (!stripeAccountId) {
+      const account = await stripe.accounts.create({
+        type: "express",
+        country: "CZ",
+        capabilities: {
+          card_payments: { requested: true },
+          transfers: { requested: true },
+        },
+      });
+      stripeAccountId = account.id;
+      await userRef.set({ stripeAccountId }, { merge: true });
+    }
+
+    const isDev = process.env.FUNCTIONS_EMULATOR === "true";
+    const baseUrl = isDev ? "http://localhost:5173" : "https://selffunl.cz";
+
+    const accountLink = await stripe.accountLinks.create({
+      account: stripeAccountId,
+      refresh_url: `${baseUrl}/dashboard`,
+      return_url:  `${baseUrl}/dashboard`,
+      type: "account_onboarding",
+    });
+
+    return { url: accountLink.url };
+  }
+);
+
+// ─── STRIPE CONNECT: zkontroluj stav účtu ──────────────────────────────────
+exports.getConnectStatus = onCall(
+  { secrets: [STRIPE_SECRET] },
+  async (request) => {
+    if (!request.auth) throw new HttpsError("unauthenticated", "Musíš být přihlášen.");
+
+    const uid = request.auth.uid;
+    const db = admin.firestore();
+    const userDoc = await db.collection("users").doc(uid).get();
+    const stripeAccountId = userDoc.data()?.stripeAccountId;
+
+    if (!stripeAccountId) return { connected: false };
+
+    const stripe = Stripe(STRIPE_SECRET.value());
+    const account = await stripe.accounts.retrieve(stripeAccountId);
+
+    return {
+      connected: account.charges_enabled,
+      payoutsEnabled: account.payouts_enabled,
+      detailsSubmitted: account.details_submitted,
+    };
+  }
+);
+
+// ─── STRIPE CONNECT: webhook ────────────────────────────────────────────────
+exports.stripeWebhook = onRequest(
+  { secrets: [STRIPE_SECRET, WEBHOOK_SECRET] },
+  async (req, res) => {
+    const sig = req.headers["stripe-signature"];
+    const stripe = Stripe(STRIPE_SECRET.value());
+    let event;
+
+    try {
+      event = stripe.webhooks.constructEvent(req.rawBody, sig, WEBHOOK_SECRET.value());
+    } catch (err) {
+      console.error("Webhook signature error:", err.message);
+      return res.status(400).send(`Webhook Error: ${err.message}`);
+    }
+
+    if (event.type === "account.updated") {
+      const account = event.data.object;
+      const db = admin.firestore();
+
+      const snap = await db
+        .collection("users")
+        .where("stripeAccountId", "==", account.id)
+        .limit(1)
+        .get();
+
+      if (!snap.empty) {
+        await snap.docs[0].ref.set(
+          {
+            stripeChargesEnabled: account.charges_enabled,
+            stripePayoutsEnabled: account.payouts_enabled,
+            stripeDetailsSubmitted: account.details_submitted,
+          },
+          { merge: true }
+        );
+      }
+    }
+
+    res.json({ received: true });
   }
 );

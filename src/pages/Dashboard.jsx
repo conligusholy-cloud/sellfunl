@@ -3,6 +3,7 @@ import { signOut } from "firebase/auth";
 import { auth } from "../firebase/config";
 import { useNavigate, useLocation, Outlet } from "react-router-dom";
 import { useAuthState } from "../hooks/useAuthState";
+import StripeConnect from "../components/StripeConnect";
 import logo from "../assets/logo.svg";
 
 const menuItems = [
@@ -14,8 +15,8 @@ export default function Dashboard() {
   const { user }  = useAuthState();
   const navigate  = useNavigate();
   const location  = useLocation();
-  const [theme,     setTheme]     = useState(localStorage.getItem("theme") || "light");
-  const [collapsed, setCollapsed] = useState(false);
+  const [theme,      setTheme]      = useState(localStorage.getItem("theme") || "light");
+  const [collapsed,  setCollapsed]  = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [isMobile,   setIsMobile]   = useState(window.innerWidth < 768);
 
@@ -30,7 +31,6 @@ export default function Dashboard() {
     return () => window.removeEventListener("resize", onResize);
   }, []);
 
-  // Zavři mobilní menu při navigaci
   useEffect(() => { setMobileOpen(false); }, [location.pathname]);
 
   async function handleLogout() {
@@ -53,21 +53,14 @@ export default function Dashboard() {
 
       {/* SIDEBAR */}
       <aside style={{
-        width: sidebarW,
-        minWidth: sidebarW,
+        width: sidebarW, minWidth: sidebarW,
         background: "var(--bg-card)",
         borderRight: "1px solid var(--border)",
-        display: "flex",
-        flexDirection: "column",
+        display: "flex", flexDirection: "column",
         transition: "width .2s, min-width .2s, transform .2s",
         overflow: "hidden",
-        // Na mobilu — absolutní pozice, slide in/out
         ...(isMobile ? {
-          position: "fixed",
-          top: 0,
-          left: 0,
-          height: "100vh",
-          zIndex: 50,
+          position:"fixed", top:0, left:0, height:"100vh", zIndex:50,
           transform: mobileOpen ? "translateX(0)" : "translateX(-100%)",
           boxShadow: mobileOpen ? "4px 0 24px rgba(0,0,0,.15)" : "none",
         } : {}),
@@ -109,7 +102,7 @@ export default function Dashboard() {
           })}
         </nav>
 
-        {/* Collapse button — jen na desktopu */}
+        {/* Collapse — jen desktop */}
         {!isMobile && (
           <button onClick={() => setCollapsed(c => !c)}
             style={{ margin:"8px", padding:"8px", borderRadius:"8px", border:"1px solid var(--border)", background:"transparent", cursor:"pointer", color:"var(--text-muted)", fontSize:".85rem" }}>
@@ -117,7 +110,7 @@ export default function Dashboard() {
           </button>
         )}
 
-        {/* Logout v sidebaru na mobilu */}
+        {/* Logout — jen mobil */}
         {isMobile && (
           <div style={{ padding:"12px", borderTop:"1px solid var(--border)" }}>
             <button onClick={handleLogout}
@@ -134,24 +127,15 @@ export default function Dashboard() {
         {/* TOPBAR */}
         <header style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:"12px", padding:"12px 16px", borderBottom:"1px solid var(--border)", background:"var(--bg-card)", flexShrink:0 }}>
           <div style={{ display:"flex", alignItems:"center", gap:"10px" }}>
-            {/* Hamburger na mobilu */}
             {isMobile && (
               <button onClick={() => setMobileOpen(true)}
-                style={{ background:"none", border:"none", cursor:"pointer", fontSize:"1.4rem", color:"var(--text)", padding:"4px", lineHeight:1 }}>
-                ☰
-              </button>
+                style={{ background:"none", border:"none", cursor:"pointer", fontSize:"1.4rem", color:"var(--text)", padding:"4px", lineHeight:1 }}>☰</button>
             )}
-            {isMobile && (
-              <img src={logo} alt="SellFunl" style={{ height:"24px" }} />
-            )}
+            {isMobile && <img src={logo} alt="SellFunl" style={{ height:"24px" }} />}
           </div>
-
           <div style={{ display:"flex", alignItems:"center", gap:"8px", marginLeft:"auto" }}>
-            {!isMobile && (
-              <span style={{ fontSize:".85rem", color:"var(--text-muted)" }}>{user?.email}</span>
-            )}
-            <button
-              onClick={() => setTheme(t => t === "light" ? "dark" : "light")}
+            {!isMobile && <span style={{ fontSize:".85rem", color:"var(--text-muted)" }}>{user?.email}</span>}
+            <button onClick={() => setTheme(t => t === "light" ? "dark" : "light")}
               style={{ padding:"7px 12px", borderRadius:"8px", border:"none", cursor:"pointer", background:"#ede9fe", color:"#7c3aed", fontWeight:600, fontSize:".85rem" }}>
               {theme === "light" ? "🌙" : "☀️"}
             </button>
@@ -166,6 +150,34 @@ export default function Dashboard() {
 
         {/* OBSAH */}
         <main style={{ flex:1, padding: isMobile ? "16px" : "32px 24px", overflowX:"hidden" }}>
+
+          {/* PŘEHLED — zobrazí se jen na /dashboard */}
+          {location.pathname === "/dashboard" && (
+            <div>
+              <h2 style={{ fontSize:"1.3rem", fontWeight:700, marginBottom:"24px", color:"var(--text)" }}>
+                Přehled
+              </h2>
+
+              {/* Uvítání */}
+              <div style={{ padding:"20px", borderRadius:"12px", background:"var(--bg-card)", border:"1px solid var(--border)", marginBottom:"20px" }}>
+                <p style={{ fontSize:"1rem", fontWeight:600, color:"var(--text)", marginBottom:"4px" }}>
+                  Vítej zpět{user?.email ? `, ${user.email.split("@")[0]}` : ""}!
+                </p>
+                <p style={{ fontSize:".88rem", color:"var(--text-muted)" }}>
+                  Zde najdeš přehled svého účtu a nastavení plateb.
+                </p>
+              </div>
+
+              {/* Stripe sekce */}
+              <div style={{ marginBottom:"24px" }}>
+                <h3 style={{ fontSize:".85rem", fontWeight:600, color:"var(--text-muted)", marginBottom:"12px", textTransform:"uppercase", letterSpacing:".05em" }}>
+                  Platební účet
+                </h3>
+                <StripeConnect />
+              </div>
+            </div>
+          )}
+
           <Outlet />
         </main>
       </div>
