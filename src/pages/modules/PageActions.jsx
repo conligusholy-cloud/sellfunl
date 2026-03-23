@@ -1,6 +1,7 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { collection, getDocs, query, where } from "firebase/firestore";
-import { db, app } from "../../firebase/config";
+import { db, app, storage } from "../../firebase/config";
+import { ref as storageRef, uploadBytesResumable, getDownloadURL } from "firebase/storage";
 import { getFunctions, httpsCallable } from "firebase/functions";
 
 const FORM_FIELD_OPTIONS = ["Jméno", "Email", "Telefon", "Firma", "Zpráva", "Souhlas GDPR"];
@@ -43,7 +44,36 @@ export default function PageActions({ page, update, formFields, setFormFields, u
   const [negativeAction, setNegativeAction] = useState("downsell");
   const [dualOutput,     setDualOutput]     = useState(false);
   const [productType,    setProductType]    = useState("physical");
-  const [afterPayment,   setAfterPayment]   = useState("email");
+  const [afterPayment,   setAfterPayment]   = useState(page.afterPayment || "email");
+
+  // Upload souboru ke stažení
+  const fileRef = useRef(null);
+  const [uploading,     setUploading]     = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
+
+  function handleAfterPaymentChange(val) {
+    setAfterPayment(val);
+    update("afterPayment", val);
+  }
+
+  async function handleFileUpload(e) {
+    const file = e.target.files?.[0];
+    if (!file || !userId) return;
+    e.target.value = "";
+    setUploading(true); setUploadProgress(0);
+    const path = `downloads/${userId}/${Date.now()}_${file.name}`;
+    const task = uploadBytesResumable(storageRef(storage, path), file);
+    task.on("state_changed",
+      snap => setUploadProgress(Math.round((snap.bytesTransferred / snap.totalBytes) * 100)),
+      err  => { alert("Upload selhal: " + err.message); setUploading(false); },
+      async () => {
+        const url = await getDownloadURL(task.snapshot.ref);
+        update("downloadUrl", url);
+        update("downloadName", file.name);
+        setUploading(false);
+      }
+    );
+  }
   const [intMC, setIntMC] = useState(false); const [mcKey, setMcKey] = useState(""); const [mcAud, setMcAud] = useState("");
   const [intAC, setIntAC] = useState(false); const [acUrl, setAcUrl] = useState(""); const [acKey, setAcKey] = useState("");
 
@@ -189,8 +219,9 @@ export default function PageActions({ page, update, formFields, setFormFields, u
             </div>
           ))}
         </div>
+
         <span style={S.lbl}>Co se stane po zaplacení?</span>
-        <select value={afterPayment} onChange={e=>setAfterPayment(e.target.value)} style={S.input}>
+        <select value={afterPayment} onChange={e=>handleAfterPaymentChange(e.target.value)} style={{ ...S.input, marginBottom:"10px" }}>
           {productType==="physical" ? <>
             <option value="email">📧 Potvrzovací email zákazníkovi</option>
             <option value="redirect">↗ Přesměrování na potvrzovací stránku</option>
@@ -201,6 +232,56 @@ export default function PageActions({ page, update, formFields, setFormFields, u
             <option value="redirect">↗ Přesměrování do členské sekce</option>
           </>}
         </select>
+
+        {/* Přesměrování — zadej URL */}
+        {afterPayment === "redirect" && (
+          <div>
+            <label style={S.lbl}>URL přesměrování po zaplacení</label>
+            <input
+              value={page.successUrl || ""}
+              onChange={e => update("successUrl", e.target.value)}
+              placeholder="https://mujweb.cz/dekujeme"
+              style={S.input}
+            />
+            <p style={{ fontSize:".72rem", color:"var(--text-muted)", marginTop:"5px" }}>
+              Zákazník bude po úspěšné platbě přesměrován na tuto URL.
+            </p>
+          </div>
+        )}
+
+        {/* Ke stažení — nahraj soubor */}
+        {afterPayment === "download" && (
+          <div>
+            <label style={S.lbl}>Soubor ke stažení</label>
+            <input ref={fileRef} type="file" style={{ display:"none" }} onChange={handleFileUpload} />
+
+            {page.downloadUrl ? (
+              <div style={{ padding:"9px 11px", border:"1px solid #6ee7b7", borderRadius:"8px", background:"#f0fdf4", display:"flex", alignItems:"center", gap:"8px", marginBottom:"7px" }}>
+                <span style={{ fontSize:"18px" }}>📄</span>
+                <div style={{ flex:1, overflow:"hidden" }}>
+                  <div style={{ fontSize:".82rem", fontWeight:600, color:"#065f46", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{page.downloadName || "Soubor"}</div>
+                  <div style={{ fontSize:".72rem", color:"#059669" }}>✅ Nahráno — zákazník dostane odkaz po zaplacení</div>
+                </div>
+                <button onClick={() => { update("downloadUrl",""); update("downloadName",""); }}
+                  style={{ background:"none", border:"none", cursor:"pointer", color:"#dc2626", fontSize:"16px", padding:"2px" }}>✕</button>
+              </div>
+            ) : (
+              <button onClick={() => fileRef.current?.click()} disabled={uploading}
+                style={{ width:"100%", padding:"10px", border:"2px dashed var(--border)", borderRadius:"8px", background:"transparent", color:"var(--text-muted)", cursor:"pointer", fontSize:".85rem", display:"flex", alignItems:"center", justifyContent:"center", gap:"6px" }}>
+                {uploading ? `⏳ Nahrávám... ${uploadProgress}%` : "⬆ Nahrát soubor (PDF, ZIP, MP4...)"}
+              </button>
+            )}
+
+            {uploading && (
+              <div style={{ marginTop:"6px", height:"4px", background:"var(--border)", borderRadius:"2px" }}>
+                <div style={{ height:"100%", background:"#7c3aed", width:`${uploadProgress}%`, borderRadius:"2px", transition:"width .2s" }} />
+              </div>
+            )}
+            <p style={{ fontSize:".72rem", color:"var(--text-muted)", marginTop:"5px" }}>
+              Po zaplacení zákazník automaticky dostane odkaz ke stažení.
+            </p>
+          </div>
+        )}
       </div>
 
       {/* ── Pole formuláře ── */}
