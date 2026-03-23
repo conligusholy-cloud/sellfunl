@@ -554,14 +554,65 @@ export default function PageEditor() {
   const [publishing,    setPublishing]    = useState(false);
   const [mobileView,    setMobileView]    = useState("editor");
 
+  // Textová pole která jsou SDÍLENÁ mezi všemi mockupy
+  const SHARED_HERO_KEYS = [
+    "showBadge","badgeText",
+    "showH1","h1Line1","h1Accent","h1Line2",
+    "showSub","subText",
+    "showStats","stats",
+    "showScroll",
+    "btn1","btn1Text","btn1Link",
+    "btn2","btn2Text","btn2Link",
+    "btnStyle",
+    "textAnim",
+    "mediaUrl","mediaType","mediaControls","mediaAutoplay","mediaLoop",
+  ];
+
+  // Vizuální pole která jsou PER-MOCKUP
+  // (bg, bgCustom, bgCustom2, accentCustom, overlay, layout, height,
+  //  showMedia, mediaPos, mediaStyle, mediaSize, mediaRatio, bgAnim)
+
   const currentHero = heroes[devMode] || heroes["full"] || DEFAULT_HERO;
   const isMobile = window.innerWidth < 768;
   const isMockup = devMode.startsWith("mockup");
   const publicUrl = `${PUBLIC_BASE_URL}${id}`;
   const hasUnpublishedChanges = page?.updatedAt && page?.publishedAt && page.updatedAt > page.publishedAt;
 
-  function setCurrentHero(h) { setHeroes(prev => ({ ...prev, [devMode]:h })); }
-  function switchDevice(key) { setDevMode(key); setHeroes(h => { if(!h[key]) return {...h,[key]:{...(h["full"]||DEFAULT_HERO)}}; return h; }); }
+  function setCurrentHero(h) {
+    setHeroes(prev => {
+      const updated = { ...prev, [devMode]: h };
+
+      // Synchronizuj sdílené klíče do VŠECH ostatních mockupů
+      const sharedChanges = {};
+      SHARED_HERO_KEYS.forEach(k => {
+        if (h[k] !== (prev[devMode] || {})[k]) sharedChanges[k] = h[k];
+      });
+
+      if (Object.keys(sharedChanges).length > 0) {
+        Object.keys(updated).forEach(key => {
+          if (key !== devMode) {
+            updated[key] = { ...updated[key], ...sharedChanges };
+          }
+        });
+      }
+
+      return updated;
+    });
+  }
+
+  function switchDevice(key) {
+    setDevMode(key);
+    setHeroes(h => {
+      if (!h[key]) {
+        // Nový mockup zdědí sdílené texty z aktuálního + vizuální z DEFAULT
+        const base = h[devMode] || h["full"] || DEFAULT_HERO;
+        const newHero = { ...DEFAULT_HERO };
+        SHARED_HERO_KEYS.forEach(k => { newHero[k] = base[k]; });
+        return { ...h, [key]: newHero };
+      }
+      return h;
+    });
+  }
 
   useEffect(() => {
     async function fetchPage() {
