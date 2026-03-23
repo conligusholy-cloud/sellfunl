@@ -9,7 +9,8 @@ import ResetPassword from "./pages/ResetPassword";
 import Dashboard     from "./pages/Dashboard";
 import Pages         from "./pages/modules/Pages";
 import PageEditor    from "./pages/modules/PageEditor";
-import PublicPage    from "./pages/PublicPage";   // ← nový import
+import PublicPage    from "./pages/PublicPage";
+import Domains       from "./pages/Domains";
 
 // Ochrana přihlášených stránek
 import PrivateRoute  from "./components/PrivateRoute";
@@ -28,7 +29,7 @@ export default function App() {
         <Route path="/register"       element={<Register />} />
         <Route path="/reset-password" element={<ResetPassword />} />
 
-        {/* ✅ Veřejná publikovaná stránka — BEZ přihlášení */}
+        {/* Veřejná publikovaná stránka — BEZ přihlášení */}
         <Route path="/p/:id"          element={<PublicPage />} />
 
         {/* Chráněné stránky (vyžadují přihlášení) */}
@@ -36,8 +37,7 @@ export default function App() {
           <Route path="/dashboard"  element={<Dashboard />} />
           <Route path="/pages"      element={<Pages />} />
           <Route path="/editor/:id" element={<PageEditor />} />
-          {/* Sem budeš přidávat nové moduly: */}
-          {/* <Route path="/modul-a" element={<ModulA />} /> */}
+          <Route path="/domains"    element={<Domains />} />
         </Route>
 
         {/* Výchozí přesměrování */}

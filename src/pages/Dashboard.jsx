@@ -9,6 +9,7 @@ import logo from "../assets/logo.svg";
 const menuItems = [
   { icon: "🏠", label: "Přehled", path: "/dashboard" },
   { icon: "📄", label: "Stránky", path: "/pages" },
+  { icon: "🌐", label: "Domény",  path: "/domains" },
 ];
 
 export default function Dashboard() {
@@ -43,15 +44,11 @@ export default function Dashboard() {
   return (
     <div style={{ display:"flex", minHeight:"100vh", background:"var(--bg)", position:"relative" }}>
 
-      {/* MOBILNÍ OVERLAY */}
       {isMobile && mobileOpen && (
-        <div
-          onClick={() => setMobileOpen(false)}
-          style={{ position:"fixed", inset:0, background:"rgba(0,0,0,.4)", zIndex:49 }}
-        />
+        <div onClick={() => setMobileOpen(false)}
+          style={{ position:"fixed", inset:0, background:"rgba(0,0,0,.4)", zIndex:49 }} />
       )}
 
-      {/* SIDEBAR */}
       <aside style={{
         width: sidebarW, minWidth: sidebarW,
         background: "var(--bg-card)",
@@ -66,7 +63,6 @@ export default function Dashboard() {
         } : {}),
       }}>
 
-        {/* Logo */}
         <div style={{ padding:"20px 16px", display:"flex", alignItems:"center", gap:"10px", borderBottom:"1px solid var(--border)" }}>
           <img src={logo} alt="SellFunl" style={{ height:"32px", minWidth:"32px" }} />
           {(!collapsed || isMobile) && <span style={{ fontWeight:700, fontSize:"1.1rem", whiteSpace:"nowrap" }}>SellFunl</span>}
@@ -76,7 +72,6 @@ export default function Dashboard() {
           )}
         </div>
 
-        {/* Menu */}
         <nav style={{ flex:1, padding:"12px 8px", display:"flex", flexDirection:"column", gap:"4px" }}>
           {menuItems.map(item => {
             const active = location.pathname === item.path;
@@ -102,7 +97,6 @@ export default function Dashboard() {
           })}
         </nav>
 
-        {/* Collapse — jen desktop */}
         {!isMobile && (
           <button onClick={() => setCollapsed(c => !c)}
             style={{ margin:"8px", padding:"8px", borderRadius:"8px", border:"1px solid var(--border)", background:"transparent", cursor:"pointer", color:"var(--text-muted)", fontSize:".85rem" }}>
@@ -110,7 +104,6 @@ export default function Dashboard() {
           </button>
         )}
 
-        {/* Logout — jen mobil */}
         {isMobile && (
           <div style={{ padding:"12px", borderTop:"1px solid var(--border)" }}>
             <button onClick={handleLogout}
@@ -121,10 +114,8 @@ export default function Dashboard() {
         )}
       </aside>
 
-      {/* HLAVNÍ OBSAH */}
       <div style={{ flex:1, display:"flex", flexDirection:"column", overflow:"auto", minWidth:0 }}>
 
-        {/* TOPBAR */}
         <header style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:"12px", padding:"12px 16px", borderBottom:"1px solid var(--border)", background:"var(--bg-card)", flexShrink:0 }}>
           <div style={{ display:"flex", alignItems:"center", gap:"10px" }}>
             {isMobile && (
@@ -148,17 +139,12 @@ export default function Dashboard() {
           </div>
         </header>
 
-        {/* OBSAH */}
         <main style={{ flex:1, padding: isMobile ? "16px" : "32px 24px", overflowX:"hidden" }}>
-
-          {/* PŘEHLED — zobrazí se jen na /dashboard */}
           {location.pathname === "/dashboard" && (
             <div>
               <h2 style={{ fontSize:"1.3rem", fontWeight:700, marginBottom:"24px", color:"var(--text)" }}>
                 Přehled
               </h2>
-
-              {/* Uvítání */}
               <div style={{ padding:"20px", borderRadius:"12px", background:"var(--bg-card)", border:"1px solid var(--border)", marginBottom:"20px" }}>
                 <p style={{ fontSize:"1rem", fontWeight:600, color:"var(--text)", marginBottom:"4px" }}>
                   Vítej zpět{user?.email ? `, ${user.email.split("@")[0]}` : ""}!
@@ -167,8 +153,6 @@ export default function Dashboard() {
                   Zde najdeš přehled svého účtu a nastavení plateb.
                 </p>
               </div>
-
-              {/* Stripe sekce */}
               <div style={{ marginBottom:"24px" }}>
                 <h3 style={{ fontSize:".85rem", fontWeight:600, color:"var(--text-muted)", marginBottom:"12px", textTransform:"uppercase", letterSpacing:".05em" }}>
                   Platební účet
@@ -177,7 +161,6 @@ export default function Dashboard() {
               </div>
             </div>
           )}
-
           <Outlet />
         </main>
       </div>
