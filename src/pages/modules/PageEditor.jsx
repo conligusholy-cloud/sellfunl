@@ -361,7 +361,7 @@ function Toast({ msg }) {
 }
 
 // ─── EditablePageContent — funguje ve všech mockupech i desktop náhledu ───────
-function EditablePageContent({ hero, page, formFields, onUpdate, renderMediaBlock, mediaBlocks, onHeroClick }) {
+function EditablePageContent({ hero, page, formFields, onUpdate, renderMediaBlock, mediaBlocks, onHeroClick, heroKey }) {
   return (
     <div>
       <style>{INLINE_STYLES}</style>
@@ -369,7 +369,7 @@ function EditablePageContent({ hero, page, formFields, onUpdate, renderMediaBloc
       {/* Hero iframe s klikatelnými zónami */}
       <div style={{ position:"relative" }}>
         <iframe
-          key={hero?.height}
+          key={heroKey || hero?.height}
           srcDoc={buildHeroHtml(hero)}
           sandbox="allow-scripts"
           scrolling="no"
@@ -572,7 +572,8 @@ export default function PageEditor() {
   // (bg, bgCustom, bgCustom2, accentCustom, overlay, layout, height,
   //  showMedia, mediaPos, mediaStyle, mediaSize, mediaRatio, bgAnim)
 
-  const currentHero = heroes[devMode] || heroes["full"] || DEFAULT_HERO;
+  // Klíč pro force-refresh hero iframe při změně textu
+  const heroKey = `${devMode}-${currentHero?.height}-${currentHero?.badgeText}-${currentHero?.h1Line1}-${currentHero?.h1Accent}-${currentHero?.h1Line2}-${currentHero?.subText}-${currentHero?.btn1Text}-${currentHero?.btn2Text}`;
   const isMobile = window.innerWidth < 768;
   const isMockup = devMode.startsWith("mockup");
   const publicUrl = `${PUBLIC_BASE_URL}${id}`;
@@ -724,6 +725,7 @@ export default function PageEditor() {
     renderMediaBlock,
     mediaBlocks,
     onHeroClick: handleHeroClick,
+    heroKey,
   };
 
   if (loading) return <div className="loading">Načítám editor...</div>;
