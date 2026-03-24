@@ -26,18 +26,49 @@ export default function AdCreativeGenerator() {
   const [concepts, setConcepts] = useState(null);
   const [selectedFormat, setSelectedFormat] = useState("feed_square");
   const [loading, setLoading] = useState(false);
-  const [userImage, setUserImage] = useState(null); // { src: string, file: File }
+  const [userMedia, setUserMedia] = useState(null); // { src, file, type: "image"|"video", thumbSrc? }
 
-  function handleImageUpload(e) {
+  function handleMediaUpload(e) {
     const file = e.target.files?.[0];
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => setUserImage({ src: reader.result, file });
-    reader.readAsDataURL(file);
+
+    if (file.type.startsWith("video/")) {
+      // Video — extrahuj thumbnail z prvního framu
+      const video = document.createElement("video");
+      video.preload = "metadata";
+      video.muted = true;
+      const url = URL.createObjectURL(file);
+      video.src = url;
+
+      video.onloadeddata = () => {
+        video.currentTime = 0.5; // půl sekundy
+      };
+      video.onseeked = () => {
+        const canvas = document.createElement("canvas");
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(video, 0, 0);
+        const thumbSrc = canvas.toDataURL("image/png");
+        setUserMedia({ src: url, file, type: "video", thumbSrc });
+      };
+      video.onerror = () => {
+        URL.revokeObjectURL(url);
+        alert("Nepodařilo se načíst video.");
+      };
+    } else {
+      // Obrázek
+      const reader = new FileReader();
+      reader.onload = () => setUserMedia({ src: reader.result, file, type: "image" });
+      reader.readAsDataURL(file);
+    }
   }
 
-  function removeImage() {
-    setUserImage(null);
+  function removeMedia() {
+    if (userMedia?.type === "video" && userMedia.src.startsWith("blob:")) {
+      URL.revokeObjectURL(userMedia.src);
+    }
+    setUserMedia(null);
   }
 
   async function handleGenerate(e) {
@@ -103,16 +134,16 @@ export default function AdCreativeGenerator() {
               </select>
             </div>
             <div>
-              <label style={labelStyle}>Vlastní obrázek (volitelné)</label>
-              {!userImage ? (
+              <label style={labelStyle}>Obrázek nebo video (volitelné)</label>
+              {!userMedia ? (
                 <label style={{
                   display: "flex", alignItems: "center", justifyContent: "center",
                   gap: "6px", padding: "10px 12px", borderRadius: "8px",
                   border: "1px dashed var(--border)", background: "var(--bg)",
                   color: "var(--text-muted)", fontSize: ".85rem", cursor: "pointer",
                 }}>
-                  📷 Nahrát obrázek
-                  <input type="file" accept="image/*" onChange={handleImageUpload}
+                  📷 Nahrát obrázek / video
+                  <input type="file" accept="image/*,video/*" onChange={handleMediaUpload}
                     style={{ display: "none" }}
                   />
                 </label>
@@ -122,13 +153,24 @@ export default function AdCreativeGenerator() {
                   padding: "6px 12px", borderRadius: "8px",
                   border: "1px solid var(--border)", background: "var(--bg)",
                 }}>
-                  <img src={userImage.src} alt="" style={{
-                    width: "32px", height: "32px", borderRadius: "4px", objectFit: "cover",
-                  }} />
-                  <span style={{ flex: 1, fontSize: ".82rem", color: "var(--text)" }}>
-                    {userImage.file.name}
+                  {userMedia.type === "video" ? (
+                    <div style={{
+                      width: "32px", height: "32px", borderRadius: "4px",
+                      background: "#1a1a2e", display: "flex", alignItems: "center",
+                      justifyContent: "center", fontSize: ".8rem", flexShrink: 0,
+                    }}>🎬</div>
+                  ) : (
+                    <img src={userMedia.src} alt="" style={{
+                      width: "32px", height: "32px", borderRadius: "4px", objectFit: "cover",
+                    }} />
+                  )}
+                  <span style={{ flex: 1, fontSize: ".82rem", color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {userMedia.file.name}
                   </span>
-                  <button type="button" onClick={removeImage} style={{
+                  <span style={{ fontSize: ".7rem", color: "var(--text-muted)", flexShrink: 0 }}>
+                    {userMedia.type === "video" ? "VIDEO" : "IMG"}
+                  </span>
+                  <button type="button" onClick={removeMedia} style={{
                     border: "none", background: "transparent", color: "#ef4444",
                     cursor: "pointer", fontSize: ".9rem",
                   }}>✕</button>
@@ -180,7 +222,7 @@ export default function AdCreativeGenerator() {
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: "20px" }}>
           {concepts.map((concept, i) => (
             <CreativeCard key={`${i}-${selectedFormat}`} concept={concept}
-              format={format} index={i} userImage={userImage}
+              format={format} index={i} userMedia={userMedia}
             />
           ))}
         </div>
@@ -202,9 +244,51 @@ export default function AdCreativeGenerator() {
   );
 }
 
+// ─── Pomocná: relativní jas barvy (0–1) ──────────────────────────────────
+function luminance(hex) {
+  const c = hex.replace("#", "");
+  const r = parseInt(c.substring(0, 2), 16) / 255;
+  const g = parseInt(c.substring(2, 4), 16) / 255;
+  const b = parseInt(c.substring(4, 6), 16) / 255;
+  const toLinear = (v) => v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+  return 0.2126 * toLinear(r) + 0.7152 * toLinear(g) + 0.0722 * toLinear(b);
+}
+
+function contrastRatio(hex1, hex2) {
+  const l1 = luminance(hex1);
+  const l2 = luminance(hex2);
+  const lighter = Math.max(l1, l2);
+  const darker = Math.min(l1, l2);
+  return (lighter + 0.05) / (darker + 0.05);
+}
+
+// Zajistí dobrý kontrast — pokud je špatný, vrátí bílou nebo černou
+function ensureContrast(textHex, bgHex, minRatio = 3.5) {
+  try {
+    if (contrastRatio(textHex, bgHex) >= minRatio) return textHex;
+  } catch { /* invalid hex */ }
+  // Fallback: bílá nebo černá podle pozadí
+  const bgLum = luminance(bgHex || "#000000");
+  return bgLum > 0.4 ? "#000000" : "#ffffff";
+}
+
+// Průměrná barva gradientu
+function avgGradientColor(grad) {
+  try {
+    const [c1, c2] = grad || ["#667eea", "#764ba2"];
+    const hex = (s) => parseInt(s.replace("#", ""), 16);
+    const r1 = (hex(c1) >> 16) & 0xff, g1 = (hex(c1) >> 8) & 0xff, b1 = hex(c1) & 0xff;
+    const r2 = (hex(c2) >> 16) & 0xff, g2 = (hex(c2) >> 8) & 0xff, b2 = hex(c2) & 0xff;
+    const avg = (a, b) => Math.round((a + b) / 2);
+    const toHex = (v) => v.toString(16).padStart(2, "0");
+    return `#${toHex(avg(r1, r2))}${toHex(avg(g1, g2))}${toHex(avg(b1, b2))}`;
+  } catch {
+    return "#555555";
+  }
+}
+
 // ─── Render kreativy na Canvas ─────────────────────────────────────────────
-function renderCreative(ctx, concept, w, h, userImg) {
-  // Gradient pozadí
+function renderCreative(ctx, concept, w, h, mediaImg) {
   const [c1, c2] = concept.bgGradient || ["#667eea", "#764ba2"];
   const grad = ctx.createLinearGradient(0, 0, w, h);
   grad.addColorStop(0, c1);
@@ -222,43 +306,41 @@ function renderCreative(ctx, concept, w, h, userImg) {
   ctx.arc(w * 0.08, h * 0.88, w * 0.18, 0, Math.PI * 2);
   ctx.fill();
 
-  const textColor = concept.textColor || "#ffffff";
+  // Kontrast: ověření, že textColor je čitelný na gradientu
+  const avgBg = avgGradientColor(concept.bgGradient);
+  const textColor = ensureContrast(concept.textColor || "#ffffff", avgBg, 3.5);
+
   const layout = concept.layout || "centered";
   const padding = w * 0.08;
   const isLandscape = w / h > 1.5;
   const isStory = h / w > 1.5;
 
-  // User image
-  const hasImage = !!userImg;
+  // User media (image or video thumbnail)
+  const hasMedia = !!mediaImg;
   let textAreaX = padding;
   let textAreaW = w - padding * 2;
   let textStartY;
 
-  if (hasImage && layout === "split") {
-    // Split: obrázek vlevo/nahoře, text vpravo/dole
+  if (hasMedia && layout === "split") {
     if (isLandscape) {
-      // Landscape: obrázek vlevo
       const imgW = w * 0.4;
-      ctx.drawImage(userImg, 0, 0, imgW, h);
+      ctx.drawImage(mediaImg, 0, 0, imgW, h);
       textAreaX = imgW + padding * 0.5;
       textAreaW = w - imgW - padding * 1.5;
       textStartY = h * 0.2;
     } else if (isStory) {
-      // Story: obrázek nahoře
       const imgH = h * 0.4;
-      ctx.drawImage(userImg, 0, 0, w, imgH);
+      ctx.drawImage(mediaImg, 0, 0, w, imgH);
       textStartY = imgH + padding;
     } else {
-      // Square: obrázek nahoře
       const imgH = h * 0.45;
-      ctx.drawImage(userImg, 0, 0, w, imgH);
+      ctx.drawImage(mediaImg, 0, 0, w, imgH);
       textStartY = imgH + padding * 0.5;
     }
-  } else if (hasImage) {
-    // Centered/left: obrázek jako overlay s opacity
+  } else if (hasMedia) {
+    // Overlay
     ctx.globalAlpha = 0.2;
-    // Cover-fit obrázek
-    const imgRatio = userImg.width / userImg.height;
+    const imgRatio = mediaImg.width / mediaImg.height;
     const canvasRatio = w / h;
     let sw, sh, sx, sy;
     if (imgRatio > canvasRatio) {
@@ -268,15 +350,13 @@ function renderCreative(ctx, concept, w, h, userImg) {
       sw = w; sh = w / imgRatio;
       sx = 0; sy = (h - sh) / 2;
     }
-    ctx.drawImage(userImg, sx, sy, sw, sh);
+    ctx.drawImage(mediaImg, sx, sy, sw, sh);
     ctx.globalAlpha = 1.0;
-
-    // Tmavý overlay pro čitelnost
-    ctx.fillStyle = "rgba(0,0,0,0.35)";
+    ctx.fillStyle = "rgba(0,0,0,0.4)";
     ctx.fillRect(0, 0, w, h);
   }
 
-  // Pozice textu podle formátu
+  // Pozice textu
   if (!textStartY) {
     if (isLandscape) textStartY = h * 0.15;
     else if (isStory) textStartY = h * 0.28;
@@ -298,52 +378,76 @@ function renderCreative(ctx, concept, w, h, userImg) {
     curY += emojiSize * 1.4;
   }
 
-  // Headline — dynamická velikost
-  const headlineMaxSize = isLandscape ? w * 0.06 : w * 0.08;
-  const headlineSize = Math.round(Math.min(headlineMaxSize, textAreaW * 0.12));
+  // Headline — dynamická velikost s minimem
+  const headlineMaxSize = isLandscape ? w * 0.065 : w * 0.085;
+  const headlineSize = Math.max(Math.round(Math.min(headlineMaxSize, textAreaW * 0.12)), 18);
   ctx.fillStyle = textColor;
   ctx.font = `bold ${headlineSize}px -apple-system, "Segoe UI", sans-serif`;
 
-  // Stín pro čitelnost
-  ctx.shadowColor = "rgba(0,0,0,0.4)";
-  ctx.shadowBlur = 8;
+  // Silný stín pro čitelnost
+  ctx.shadowColor = "rgba(0,0,0,0.6)";
+  ctx.shadowBlur = 12;
   ctx.shadowOffsetX = 0;
-  ctx.shadowOffsetY = 2;
+  ctx.shadowOffsetY = 3;
 
   curY = wrapText(ctx, concept.headline || "", textX, curY, textAreaW, headlineSize * 1.25);
-  curY += headlineSize * 0.5;
-
-  // Reset stínu
-  ctx.shadowColor = "transparent";
-  ctx.shadowBlur = 0;
+  curY += headlineSize * 0.6;
 
   // Subtext
   if (concept.subtext) {
-    const subSize = Math.round(headlineSize * 0.5);
+    const subSize = Math.max(Math.round(headlineSize * 0.5), 14);
     ctx.font = `${subSize}px -apple-system, "Segoe UI", sans-serif`;
-    ctx.fillStyle = textColor + "dd";
-    ctx.shadowColor = "rgba(0,0,0,0.3)";
-    ctx.shadowBlur = 4;
-    curY = wrapText(ctx, concept.subtext, textX, curY, textAreaW, subSize * 1.4);
-    curY += subSize * 1.5;
-    ctx.shadowColor = "transparent";
-    ctx.shadowBlur = 0;
+    ctx.fillStyle = textColor;
+    ctx.shadowColor = "rgba(0,0,0,0.5)";
+    ctx.shadowBlur = 8;
+    curY = wrapText(ctx, concept.subtext, textX, curY, textAreaW, subSize * 1.5);
+    curY += subSize * 1.8;
   }
 
-  // CTA tlačítko
-  if (concept.ctaText) {
-    const ctaSize = Math.round(headlineSize * 0.38);
-    ctx.font = `bold ${ctaSize}px -apple-system, "Segoe UI", sans-serif`;
-    const ctaPadX = ctaSize * 1.5;
-    const ctaPadY = ctaSize * 0.8;
-    const ctaTextW = ctx.measureText(concept.ctaText).width;
-    const ctaW = ctaTextW + ctaPadX * 2;
-    const ctaH = ctaSize + ctaPadY * 2;
-    const ctaX = align === "center" ? textX - ctaW / 2 : textAreaX;
-    const ctaY = curY;
-    const r = ctaH / 2;
+  // Reset stínu před CTA
+  ctx.shadowColor = "transparent";
+  ctx.shadowBlur = 0;
+  ctx.shadowOffsetX = 0;
+  ctx.shadowOffsetY = 0;
 
-    ctx.fillStyle = concept.ctaBgColor || "#ffffff";
+  // ─── CTA tlačítko — vždy viditelné a dostatečně velké ───
+  if (concept.ctaText) {
+    // Minimální velikost CTA textu: 55 % headline, ale alespoň 16px
+    const ctaFontSize = Math.max(Math.round(headlineSize * 0.55), 16);
+    ctx.font = `bold ${ctaFontSize}px -apple-system, "Segoe UI", sans-serif`;
+
+    const ctaPadX = Math.max(ctaFontSize * 1.8, 28);
+    const ctaPadY = Math.max(ctaFontSize * 0.9, 14);
+    const ctaTextW = ctx.measureText(concept.ctaText).width;
+    const ctaW = Math.max(ctaTextW + ctaPadX * 2, w * 0.28); // min 28 % šířky
+    const ctaH = Math.max(ctaFontSize + ctaPadY * 2, w * 0.065); // min 6.5 % šířky
+    const ctaX = align === "center" ? textX - ctaW / 2 : textAreaX;
+
+    // Zajisti, že CTA nepřetéká canvas — posun nahoru pokud potřeba
+    const maxCtaY = h - ctaH - padding;
+    const ctaY = Math.min(curY, maxCtaY);
+    const r = Math.min(ctaH / 2, 20);
+
+    // Barva CTA pozadí — pokud má špatný kontrast s gradientem, vyber fallback
+    let ctaBg = concept.ctaBgColor || "#ffffff";
+    let ctaText = concept.ctaTextColor || "#000000";
+
+    // Ověř kontrast CTA pozadí vs gradient (musí vyniknout)
+    const ctaBgContrast = contrastRatio(ctaBg, avgBg);
+    if (ctaBgContrast < 2.0) {
+      // CTA pozadí je příliš podobné gradientu — vyber kontrastní
+      ctaBg = luminance(avgBg) > 0.4 ? "#1a1a2e" : "#ffffff";
+    }
+    // Ověř kontrast CTA text vs CTA pozadí
+    ctaText = ensureContrast(ctaText, ctaBg, 4.5);
+
+    // Stín pod tlačítkem
+    ctx.shadowColor = "rgba(0,0,0,0.35)";
+    ctx.shadowBlur = 10;
+    ctx.shadowOffsetY = 4;
+
+    // Rounded rect
+    ctx.fillStyle = ctaBg;
     ctx.beginPath();
     ctx.moveTo(ctaX + r, ctaY);
     ctx.lineTo(ctaX + ctaW - r, ctaY);
@@ -354,26 +458,43 @@ function renderCreative(ctx, concept, w, h, userImg) {
     ctx.quadraticCurveTo(ctaX, ctaY + ctaH, ctaX, ctaY + ctaH - r);
     ctx.lineTo(ctaX, ctaY + r);
     ctx.quadraticCurveTo(ctaX, ctaY, ctaX + r, ctaY);
+    ctx.closePath();
     ctx.fill();
 
-    ctx.fillStyle = concept.ctaTextColor || "#000000";
+    // Reset shadow before text
+    ctx.shadowColor = "transparent";
+    ctx.shadowBlur = 0;
+    ctx.shadowOffsetY = 0;
+
+    // Border pro extra viditelnost
+    ctx.strokeStyle = "rgba(255,255,255,0.3)";
+    ctx.lineWidth = Math.max(1, w * 0.002);
+    ctx.stroke();
+
+    // CTA text
+    ctx.fillStyle = ctaText;
     ctx.textAlign = "center";
-    ctx.fillText(concept.ctaText, ctaX + ctaW / 2, ctaY + ctaH / 2 + ctaSize * 0.35);
+    ctx.font = `bold ${ctaFontSize}px -apple-system, "Segoe UI", sans-serif`;
+    ctx.fillText(concept.ctaText, ctaX + ctaW / 2, ctaY + ctaH / 2 + ctaFontSize * 0.35);
   }
 }
 
 // ─── Karta konceptu ────────────────────────────────────────────────────────
-function CreativeCard({ concept, format, index, userImage }) {
+function CreativeCard({ concept, format, index, userMedia }) {
   const canvasRef = useRef(null);
   const [loadedImg, setLoadedImg] = useState(null);
 
-  // Načti user image do Image objektu
+  // Načti media — buď image nebo video thumbnail
   useEffect(() => {
-    if (!userImage?.src) { setLoadedImg(null); return; }
+    if (!userMedia) { setLoadedImg(null); return; }
+
+    const imgSrc = userMedia.type === "video" ? userMedia.thumbSrc : userMedia.src;
+    if (!imgSrc) { setLoadedImg(null); return; }
+
     const img = new Image();
     img.onload = () => setLoadedImg(img);
-    img.src = userImage.src;
-  }, [userImage?.src]);
+    img.src = imgSrc;
+  }, [userMedia?.src, userMedia?.thumbSrc, userMedia?.type]);
 
   const render = useCallback(() => {
     const canvas = canvasRef.current;
@@ -422,6 +543,7 @@ function CreativeCard({ concept, format, index, userImage }) {
         </p>
         <p style={{ fontSize: ".78rem", color: "var(--text-muted)", margin: "0 0 12px" }}>
           {concept.mood || ""} • {format.w}×{format.h}px
+          {userMedia?.type === "video" && " • 🎬 video thumbnail"}
         </p>
         <button onClick={downloadFullSize}
           style={{
