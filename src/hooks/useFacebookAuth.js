@@ -1,8 +1,7 @@
-import { useState, useEffect } from "react";
-import { doc, getDoc, deleteDoc, onSnapshot } from "firebase/firestore";
-import { httpsCallable } from "firebase/functions";
+import { useState, useEffect, useCallback } from "react";
+import { doc, deleteDoc, onSnapshot } from "firebase/firestore";
+import { httpsCallable, getFunctions } from "firebase/functions";
 import { db, auth } from "../firebase/config";
-import { getFunctions } from "firebase/functions";
 
 const functions = getFunctions();
 
@@ -12,12 +11,14 @@ const functions = getFunctions();
  * Vrací:
  * - fbAccount: objekt s daty propojeného účtu (nebo null)
  * - loading: načítání stavu
+ * - exchanging: probíhá výměna tokenu
  * - connect(): spustí OAuth flow (otevře FB login popup)
  * - disconnect(): odpojí FB účet
  */
 export function useFacebookAuth() {
   const [fbAccount, setFbAccount] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [exchanging, setExchanging] = useState(false);
 
   // Poslouchej změny na facebookAccounts/{uid}
   useEffect(() => {
@@ -36,6 +37,39 @@ export function useFacebookAuth() {
     return unsub;
   }, [auth.currentUser?.uid]);
 
+  // Poslouchej postMessage z popup callback okna
+  useEffect(() => {
+    function handleMessage(event) {
+      // Ověř origin
+      if (event.origin !== window.location.origin) return;
+      if (event.data?.type !== "FB_OAUTH_CALLBACK") return;
+
+      const { code, state } = event.data;
+      if (!code || !state) return;
+
+      // Vyměň code za token (hlavní okno JE přihlášené)
+      exchangeToken(code, state);
+    }
+
+    window.addEventListener("message", handleMessage);
+    return () => window.removeEventListener("message", handleMessage);
+  }, []);
+
+  // Vyměň code za access token přes Cloud Function
+  async function exchangeToken(code, state) {
+    setExchanging(true);
+    try {
+      const exchange = httpsCallable(functions, "facebookExchangeToken");
+      await exchange({ code, state });
+      // Firestore onSnapshot automaticky aktualizuje fbAccount
+    } catch (err) {
+      console.error("FB token exchange error:", err);
+      alert("Nepodařilo se propojit účet s Facebookem. Zkus to znovu.");
+    } finally {
+      setExchanging(false);
+    }
+  }
+
   // Spustí Facebook OAuth flow
   async function connect() {
     try {
@@ -43,7 +77,6 @@ export function useFacebookAuth() {
       const { data } = await createLink();
 
       if (data?.url) {
-        // Otevři Facebook login v novém okně
         const width = 600, height = 700;
         const left = window.screenX + (window.outerWidth - width) / 2;
         const top = window.screenY + (window.outerHeight - height) / 2;
@@ -75,5 +108,5 @@ export function useFacebookAuth() {
     }
   }
 
-  return { fbAccount, loading, connect, disconnect };
+  return { fbAccount, loading, exchanging, connect, disconnect };
 }
