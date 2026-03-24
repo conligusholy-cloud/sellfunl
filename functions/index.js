@@ -338,7 +338,7 @@ exports.facebookExchangeToken = onCall(
 
     // Ověř state token
     const stateDoc = await db.collection("fbOAuthState").doc(state).get();
-    if (!stateDoc.exists() || stateDoc.data().userId !== uid) {
+    if (!stateDoc.exists || stateDoc.data().userId !== uid) {
       throw new HttpsError("permission-denied", "Neplatný OAuth state.");
     }
     // Smaž state token (jednorázový)
