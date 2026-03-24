@@ -448,13 +448,14 @@ function CampaignWizard({ adAccountId, onClose, onCreated }) {
 
   async function createCampaign() {
     if (!campForm.name || !campForm.objective) return alert("Vyplň název a cíl kampaně.");
+    if (!campForm.dailyBudget || Number(campForm.dailyBudget) < 1) return alert("Vyplň denní rozpočet (min. 1 Kč).");
     setSaving(true);
     try {
       const { data } = await call("fbCreateCampaign")({
         adAccountId,
         name: campForm.name,
         objective: campForm.objective,
-        dailyBudget: campForm.dailyBudget ? Number(campForm.dailyBudget) : undefined,
+        dailyBudget: Number(campForm.dailyBudget),
       });
       setCreatedIds(ids => ({ ...ids, campaignId: data.campaignId }));
       setAdSetForm(f => ({ ...f, name: `${campForm.name} - Ad Set` }));
@@ -490,7 +491,6 @@ function CampaignWizard({ adAccountId, onClose, onCreated }) {
         adAccountId,
         campaignId: createdIds.campaignId,
         name: adSetForm.name,
-        dailyBudget: adSetForm.dailyBudget ? Number(adSetForm.dailyBudget) : undefined,
         optimizationGoal: adSetForm.optimizationGoal,
         targeting,
       });
@@ -601,13 +601,13 @@ function CampaignWizard({ adAccountId, onClose, onCreated }) {
             </div>
           </div>
           <div>
-            <label style={labelStyle}>Denní rozpočet (Kč, volitelné)</label>
+            <label style={labelStyle}>Denní rozpočet (Kč) *</label>
             <input type="number" value={campForm.dailyBudget}
               onChange={e => setCampForm(f => ({ ...f, dailyBudget: e.target.value }))}
               placeholder="např. 500" style={inputStyle} min="1"
             />
             <p style={{ fontSize: ".75rem", color: "var(--text-muted)", marginTop: "4px" }}>
-              Rozpočet se nastaví na úrovni kampaně. Můžeš ho nastavit i na ad setu.
+              Facebook automaticky rozdělí rozpočet mezi ad sety.
             </p>
           </div>
           <div style={{ display: "flex", gap: "8px" }}>
@@ -629,25 +629,16 @@ function CampaignWizard({ adAccountId, onClose, onCreated }) {
               style={inputStyle}
             />
           </div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
-            <div>
-              <label style={labelStyle}>Denní rozpočet ad setu (Kč)</label>
-              <input type="number" value={adSetForm.dailyBudget}
-                onChange={e => setAdSetForm(f => ({ ...f, dailyBudget: e.target.value }))}
-                placeholder="např. 300" style={inputStyle} min="1"
-              />
-            </div>
-            <div>
-              <label style={labelStyle}>Optimalizace</label>
-              <select value={adSetForm.optimizationGoal}
-                onChange={e => setAdSetForm(f => ({ ...f, optimizationGoal: e.target.value }))}
-                style={inputStyle}
-              >
-                {OPTIMIZATION_GOALS.map(g => (
-                  <option key={g.value} value={g.value}>{g.label}</option>
-                ))}
-              </select>
-            </div>
+          <div>
+            <label style={labelStyle}>Optimalizace</label>
+            <select value={adSetForm.optimizationGoal}
+              onChange={e => setAdSetForm(f => ({ ...f, optimizationGoal: e.target.value }))}
+              style={inputStyle}
+            >
+              {OPTIMIZATION_GOALS.map(g => (
+                <option key={g.value} value={g.value}>{g.label}</option>
+              ))}
+            </select>
           </div>
 
           <fieldset style={{ border: "1px solid var(--border)", borderRadius: "8px", padding: "16px" }}>

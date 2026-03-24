@@ -568,19 +568,29 @@ async function fbApi(path, accessToken, params = {}) {
   const url = `https://graph.facebook.com/v19.0/${path}?${qs}`;
   const res = await fetch(url);
   const data = await res.json();
-  if (data.error) throw new Error(`FB API: ${data.error.message}`);
+  if (data.error) throw new HttpsError("internal", `Facebook API: ${data.error.message} (code: ${data.error.code})`);
   return data;
 }
 
 async function fbApiPost(path, accessToken, body = {}) {
   const url = `https://graph.facebook.com/v19.0/${path}`;
+  // FB Marketing API vyžaduje form-encoded data, objekty jako JSON string
+  const formData = new URLSearchParams();
+  formData.append("access_token", accessToken);
+  for (const [key, value] of Object.entries(body)) {
+    if (value === undefined || value === null) continue;
+    formData.append(key, typeof value === "object" ? JSON.stringify(value) : String(value));
+  }
   const res = await fetch(url, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ access_token: accessToken, ...body }),
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: formData.toString(),
   });
   const data = await res.json();
-  if (data.error) throw new Error(`FB API: ${data.error.message}`);
+  if (data.error) {
+    const msg = data.error.error_user_msg || data.error.message || "Neznámá chyba";
+    throw new HttpsError("internal", `Facebook API: ${msg} (code: ${data.error.code})`);
+  }
   return data;
 }
 
@@ -667,8 +677,8 @@ exports.fbCreateCampaign = onCall(
   async (request) => {
     if (!request.auth) throw new HttpsError("unauthenticated", "Musíš být přihlášen.");
     const { adAccountId, name, objective, dailyBudget, status = "PAUSED" } = request.data;
-    if (!adAccountId || !name || !objective) {
-      throw new HttpsError("invalid-argument", "Chybí povinné parametry (adAccountId, name, objective).");
+    if (!adAccountId || !name || !objective || !dailyBudget) {
+      throw new HttpsError("invalid-argument", "Chybí povinné parametry (adAccountId, name, objective, dailyBudget).");
     }
 
     const { accessToken } = await getFbToken(request.auth.uid);
@@ -678,8 +688,9 @@ exports.fbCreateCampaign = onCall(
       objective,
       status,
       special_ad_categories: [],
+      bid_strategy: "LOWEST_COST_WITHOUT_CAP",
+      daily_budget: Math.round(dailyBudget * 100),
     };
-    if (dailyBudget) body.daily_budget = Math.round(dailyBudget * 100);
 
     const result = await fbApiPost(`${adAccountId}/campaigns`, accessToken, body);
     return { campaignId: result.id };
@@ -692,7 +703,7 @@ exports.fbCreateAdSet = onCall(
   async (request) => {
     if (!request.auth) throw new HttpsError("unauthenticated", "Musíš být přihlášen.");
     const {
-      adAccountId, campaignId, name, dailyBudget,
+      adAccountId, campaignId, name,
       optimizationGoal, billingEvent = "IMPRESSIONS",
       targeting, startTime, endTime, status = "PAUSED",
     } = request.data;
@@ -711,7 +722,6 @@ exports.fbCreateAdSet = onCall(
       billing_event: billingEvent,
       targeting,
     };
-    if (dailyBudget) body.daily_budget = Math.round(dailyBudget * 100);
     if (startTime) body.start_time = startTime;
     if (endTime) body.end_time = endTime;
 
