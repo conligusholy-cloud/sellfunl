@@ -479,3 +479,85 @@ Pravidla:
     }
   }
 );
+
+// ─── FACEBOOK ADS: AI generátor kreativních konceptů ─────────────────────────
+exports.generateAdCreative = onCall(
+  { region: "us-central1", timeoutSeconds: 120, secrets: ["ANTHROPIC_API_KEY"] },
+  async (request) => {
+    if (!request.auth) throw new HttpsError("unauthenticated", "Musíš být přihlášen.");
+
+    const { productName, productDescription, style, formats } = request.data;
+    if (!productName) throw new HttpsError("invalid-argument", "Chybí název produktu.");
+
+    const styleLabel = style || "moderní a čistý";
+    const formatList = (formats || ["feed_square", "feed_landscape", "story"]).join(", ");
+
+    const prompt = `Jsi expert na design Facebook reklam. Navrhni 3 vizuální koncepty pro reklamu.
+
+PRODUKT: ${productName}
+POPIS: ${productDescription || ""}
+STYL: ${styleLabel}
+FORMÁTY: ${formatList}
+
+Pro KAŽDÝ z 3 konceptů vygeneruj JSON (bez markdown):
+{
+  "concepts": [
+    {
+      "name": "Název konceptu",
+      "headline": "Hlavní text na obrázku (max 6 slov, velký, výrazný)",
+      "subtext": "Podtext (max 10 slov)",
+      "ctaText": "Text tlačítka (max 3 slova)",
+      "bgGradient": ["#hex1", "#hex2"],
+      "textColor": "#hex",
+      "ctaBgColor": "#hex",
+      "ctaTextColor": "#hex",
+      "accentColor": "#hex",
+      "layout": "centered|left-aligned|split",
+      "mood": "popis nálady a vizuálního stylu (2-3 slova)",
+      "emoji": "1 relevantní emoji pro produkt"
+    },
+    { ... koncept 2 (jiná barevná paleta) ... },
+    { ... koncept 3 (jiný layout a styl) ... }
+  ]
+}
+
+Pravidla:
+- Každý koncept musí mít JINOU barevnou paletu a layout
+- Barvy musí být kontrastní a čitelné
+- Gradientní pozadí (2 barvy) pro moderní vzhled
+- Headline musí být krátký a impaktní
+- CTA tlačítko musí vynikat
+- Koncept 1: čistý a profesionální
+- Koncept 2: odvážný a energický
+- Koncept 3: elegantní a prémiový`;
+
+    const response = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "x-api-key": process.env.ANTHROPIC_API_KEY,
+        "anthropic-version": "2023-06-01",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "claude-sonnet-4-20250514",
+        max_tokens: 2000,
+        messages: [{ role: "user", content: prompt }],
+      }),
+    });
+
+    if (!response.ok) {
+      throw new HttpsError("internal", `Anthropic API error: ${response.status}`);
+    }
+
+    const data = await response.json();
+    const rawText = data.content?.[0]?.text || "";
+
+    try {
+      const jsonMatch = rawText.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) throw new Error("No JSON found");
+      return { result: JSON.parse(jsonMatch[0]) };
+    } catch {
+      return { result: { raw: rawText } };
+    }
+  }
+);

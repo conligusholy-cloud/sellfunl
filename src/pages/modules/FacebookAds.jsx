@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useAuthState } from "../../hooks/useAuthState";
 import { useFacebookAuth } from "../../hooks/useFacebookAuth";
 import AdCopyGenerator from "../../components/modules/AdCopyGenerator";
+import AdCreativeGenerator from "../../components/modules/AdCreativeGenerator";
 
 // ─── Sekce modulu ──────────────────────────────────────────────────────────
 const TABS = [
@@ -63,9 +64,7 @@ export default function FacebookAds() {
       )}
 
       {activeTab === "creatives" && fbAccount && (
-        <div style={{ padding: "40px", textAlign: "center", color: "var(--text-muted)" }}>
-          🎨 Generátor kreativ — připravuje se
-        </div>
+        <AdCreativeGenerator />
       )}
 
       {activeTab === "copy" && fbAccount && (
