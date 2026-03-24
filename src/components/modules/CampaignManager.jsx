@@ -272,7 +272,7 @@ function CampaignRow({ campaign, expanded, onToggle, onStatusChange, onDelete })
             {campaign.name}
           </p>
           <p style={{ fontSize: ".78rem", color: "var(--text-muted)", margin: 0 }}>
-            {obj?.label || campaign.objective} • {budget} • {campaign.adSetCount || 0} ad setů
+            {obj?.label || campaign.objective} • {budget}
           </p>
         </div>
         <span style={{

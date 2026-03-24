@@ -619,17 +619,8 @@ exports.fbListCampaigns = onCall(
       limit: "50",
     });
 
-    const results = [];
-    for (const c of (campaigns.data || [])) {
-      let adSetCount = 0;
-      try {
-        const adSets = await fbApi(`${c.id}/adsets`, accessToken, { fields: "id", limit: "100" });
-        adSetCount = adSets.data?.length || 0;
-      } catch { /* ignore */ }
-      results.push({ ...c, adSetCount });
-    }
-
-    return { campaigns: results };
+    // Vrať kampaně bez počítání ad setů (šetří API volání, zamezí rate limitu)
+    return { campaigns: campaigns.data || [] };
   }
 );
 
