@@ -1,19 +1,21 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect } from "react";
 import { doc, deleteDoc, onSnapshot } from "firebase/firestore";
 import { httpsCallable, getFunctions } from "firebase/functions";
 import { db, auth } from "../firebase/config";
 
 const functions = getFunctions();
 
+// Povolené originy pro postMessage (hlavní okno i callback popup)
+const ALLOWED_ORIGINS = [
+  "https://sellfunl.web.app",
+  "https://sellfunl.firebaseapp.com",
+  "https://sellfunl.cz",
+  "https://sellfunl.com",
+  "http://localhost:5173",
+];
+
 /**
  * Hook pro správu Facebook OAuth propojení.
- *
- * Vrací:
- * - fbAccount: objekt s daty propojeného účtu (nebo null)
- * - loading: načítání stavu
- * - exchanging: probíhá výměna tokenu
- * - connect(): spustí OAuth flow (otevře FB login popup)
- * - disconnect(): odpojí FB účet
  */
 export function useFacebookAuth() {
   const [fbAccount, setFbAccount] = useState(null);
@@ -40,14 +42,13 @@ export function useFacebookAuth() {
   // Poslouchej postMessage z popup callback okna
   useEffect(() => {
     function handleMessage(event) {
-      // Ověř origin
-      if (event.origin !== window.location.origin) return;
+      // Ověř origin — povolit vlastní doménu i Firebase hosting
+      if (!ALLOWED_ORIGINS.includes(event.origin)) return;
       if (event.data?.type !== "FB_OAUTH_CALLBACK") return;
 
       const { code, state } = event.data;
       if (!code || !state) return;
 
-      // Vyměň code za token (hlavní okno JE přihlášené)
       exchangeToken(code, state);
     }
 

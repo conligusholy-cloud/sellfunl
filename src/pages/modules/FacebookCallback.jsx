@@ -30,10 +30,12 @@ export default function FacebookCallback() {
     }
 
     // Pošli code a state do hlavního okna
+    // Použijeme "*" protože hlavní okno může být na jiné doméně
+    // (sellfunl.com vs sellfunl.web.app)
     if (window.opener) {
       window.opener.postMessage(
         { type: "FB_OAUTH_CALLBACK", code, state },
-        window.location.origin
+        "*"
       );
       setStatus("success");
       setMessage("Propojení dokončeno!");
