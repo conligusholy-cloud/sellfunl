@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useAuthState } from "../../hooks/useAuthState";
 import { useFacebookAuth } from "../../hooks/useFacebookAuth";
+import AdCopyGenerator from "../../components/modules/AdCopyGenerator";
 
 // ─── Sekce modulu ──────────────────────────────────────────────────────────
 const TABS = [
@@ -68,9 +69,7 @@ export default function FacebookAds() {
       )}
 
       {activeTab === "copy" && fbAccount && (
-        <div style={{ padding: "40px", textAlign: "center", color: "var(--text-muted)" }}>
-          ✍️ Generátor textů — připravuje se
-        </div>
+        <AdCopyGenerator />
       )}
 
       {activeTab === "campaigns" && fbAccount && (

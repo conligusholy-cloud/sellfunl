@@ -396,3 +396,86 @@ exports.facebookExchangeToken = onCall(
     return { success: true, name: meData.name };
   }
 );
+
+// ─── FACEBOOK ADS: AI generátor textů reklam ────────────────────────────────
+exports.generateAdCopy = onCall(
+  { region: "us-central1", timeoutSeconds: 120, secrets: ["ANTHROPIC_API_KEY"] },
+  async (request) => {
+    if (!request.auth) throw new HttpsError("unauthenticated", "Musíš být přihlášen.");
+
+    const { productName, productDescription, targetAudience, tone, language = "cs" } = request.data;
+    if (!productName || !productDescription) {
+      throw new HttpsError("invalid-argument", "Chybí název produktu nebo popis.");
+    }
+
+    const langLabel = language === "cs" ? "češtině" : "angličtině";
+    const toneLabel = tone || "profesionální a přesvědčivý";
+
+    const prompt = `Jsi expert na Facebook reklamy a copywriting. Vygeneruj texty pro Facebook reklamu v ${langLabel}.
+
+PRODUKT: ${productName}
+POPIS: ${productDescription}
+CÍLOVÁ SKUPINA: ${targetAudience || "široká veřejnost"}
+TÓN: ${toneLabel}
+
+Vygeneruj JSON objekt s těmito poli (bez markdown, jen čistý JSON):
+{
+  "primaryTexts": [
+    "Primární text varianta 1 (max 125 znaků, prodejní, s emoji)",
+    "Primární text varianta 2 (jiný úhel pohledu)",
+    "Primární text varianta 3 (emotivní přístup)"
+  ],
+  "headlines": [
+    "Nadpis 1 (max 40 znaků, výrazný)",
+    "Nadpis 2 (s číslem nebo statistikou)",
+    "Nadpis 3 (otázka nebo výzva)",
+    "Nadpis 4 (benefit-focused)",
+    "Nadpis 5 (urgentní)"
+  ],
+  "descriptions": [
+    "Popisek 1 (max 30 znaků, doplňující info)",
+    "Popisek 2 (CTA oriented)",
+    "Popisek 3 (social proof nebo benefit)"
+  ],
+  "callToActions": ["SHOP_NOW", "LEARN_MORE", "SIGN_UP", "GET_OFFER"]
+}
+
+Pravidla:
+- Primární texty: 3 varianty, max 125 znaků, každá jiný přístup (racionální, emotivní, urgentní)
+- Nadpisy: 5 variant, max 40 znaků, výrazné a klikatelné
+- Popisky: 3 varianty, max 30 znaků, stručné
+- CTA: vyber 2-3 nejvhodnější z FB možností
+- Používej emoji střídmě ale efektivně
+- Buď konkrétní k produktu, ne generický`;
+
+    const response = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "x-api-key": process.env.ANTHROPIC_API_KEY,
+        "anthropic-version": "2023-06-01",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "claude-sonnet-4-20250514",
+        max_tokens: 2000,
+        messages: [{ role: "user", content: prompt }],
+      }),
+    });
+
+    if (!response.ok) {
+      throw new HttpsError("internal", `Anthropic API error: ${response.status}`);
+    }
+
+    const data = await response.json();
+    const rawText = data.content?.[0]?.text || "";
+
+    try {
+      // Extrahuj JSON z odpovědi (může být obalený v markdown)
+      const jsonMatch = rawText.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) throw new Error("No JSON found");
+      return { result: JSON.parse(jsonMatch[0]) };
+    } catch {
+      return { result: { raw: rawText } };
+    }
+  }
+);
