@@ -638,6 +638,27 @@ function CampaignWizard({ adAccountId, onClose, onCreated }) {
     name: "", dailyBudget: "", optimizationGoal: "LINK_CLICKS",
     ageMin: "18", ageMax: "65", genders: "all",
     countries: "CZ", interests: "",
+    // Geo targeting rozšířené
+    geoMode: "countries", // "countries" | "cities" | "radius"
+    cities: "",           // "Praha, Brno"
+    radiusLat: "",
+    radiusLng: "",
+    radiusKm: "25",
+    radiusName: "",       // popisek místa
+    // Placements
+    placementMode: "automatic", // "automatic" | "manual"
+    placements: {
+      facebook_feed: true,
+      facebook_stories: true,
+      facebook_reels: true,
+      facebook_right_column: true,
+      instagram_feed: true,
+      instagram_stories: true,
+      instagram_reels: true,
+      instagram_explore: true,
+      audience_network: false,
+      messenger: false,
+    },
   });
 
   // Krok 3: Reklama
@@ -698,16 +719,66 @@ function CampaignWizard({ adAccountId, onClose, onCreated }) {
       const targeting = {
         age_min: Number(adSetForm.ageMin) || 18,
         age_max: Number(adSetForm.ageMax) || 65,
-        geo_locations: {
-          countries: adSetForm.countries.split(",").map(c => c.trim().toUpperCase()).filter(Boolean),
-        },
+        geo_locations: {},
       };
-      if (adSetForm.genders !== "all") {
-        targeting.genders = [Number(adSetForm.genders)]; // 1=male, 2=female
+
+      // Geo targeting podle režimu
+      if (adSetForm.geoMode === "countries") {
+        targeting.geo_locations.countries = adSetForm.countries.split(",").map(c => c.trim().toUpperCase()).filter(Boolean);
+      } else if (adSetForm.geoMode === "cities") {
+        // FB API: cities vyžaduje pole objektů s "key" (city ID). Pro zjednodušení použijeme city name search přes API.
+        // Ale FB API umožňuje i search by name, takže pošleme to backendu
+        targeting.geo_locations.cities = adSetForm.cities.split(",").map(c => c.trim()).filter(Boolean).map(name => ({ name }));
+        // Potřebujeme alespoň zemi pro kontext
+        if (adSetForm.countries.trim()) {
+          targeting.geo_locations.countries = adSetForm.countries.split(",").map(c => c.trim().toUpperCase()).filter(Boolean);
+        }
+      } else if (adSetForm.geoMode === "radius") {
+        const lat = parseFloat(adSetForm.radiusLat);
+        const lng = parseFloat(adSetForm.radiusLng);
+        const km = parseInt(adSetForm.radiusKm) || 25;
+        if (isNaN(lat) || isNaN(lng)) return alert("Zadej platné souřadnice (lat, lng).");
+        targeting.geo_locations.custom_locations = [{
+          latitude: lat,
+          longitude: lng,
+          radius: km,
+          distance_unit: "kilometer",
+        }];
       }
-      if (adSetForm.interests.trim()) {
-        // Zájmy: uživatel zadá volně, ale FB vyžaduje ID
-        // Pro zjednodušení je přeskočíme (vyžadovalo by search API)
+
+      if (adSetForm.genders !== "all") {
+        targeting.genders = [Number(adSetForm.genders)];
+      }
+
+      // Placements
+      let publisherPlatforms, facebookPositions, instagramPositions;
+      if (adSetForm.placementMode === "manual") {
+        const p = adSetForm.placements;
+        publisherPlatforms = [];
+        facebookPositions = [];
+        instagramPositions = [];
+
+        if (p.facebook_feed || p.facebook_stories || p.facebook_reels || p.facebook_right_column) {
+          publisherPlatforms.push("facebook");
+          if (p.facebook_feed) facebookPositions.push("feed");
+          if (p.facebook_stories) facebookPositions.push("story");
+          if (p.facebook_reels) facebookPositions.push("facebook_reels");
+          if (p.facebook_right_column) facebookPositions.push("right_hand_column");
+        }
+        if (p.instagram_feed || p.instagram_stories || p.instagram_reels || p.instagram_explore) {
+          publisherPlatforms.push("instagram");
+          if (p.instagram_feed) instagramPositions.push("stream");
+          if (p.instagram_stories) instagramPositions.push("story");
+          if (p.instagram_reels) instagramPositions.push("reels");
+          if (p.instagram_explore) instagramPositions.push("explore");
+        }
+        if (p.audience_network) publisherPlatforms.push("audience_network");
+        if (p.messenger) publisherPlatforms.push("messenger");
+
+        if (publisherPlatforms.length === 0) return alert("Vyber alespoň jeden placement.");
+        targeting.publisher_platforms = publisherPlatforms;
+        if (facebookPositions.length > 0) targeting.facebook_positions = facebookPositions;
+        if (instagramPositions.length > 0) targeting.instagram_positions = instagramPositions;
       }
 
       const { data } = await call("fbCreateAdSet")({
@@ -926,9 +997,10 @@ function CampaignWizard({ adAccountId, onClose, onCreated }) {
             </select>
           </div>
 
+          {/* ═══ TARGETING ═══ */}
           <fieldset style={{ border: "1px solid var(--border)", borderRadius: "8px", padding: "16px" }}>
             <legend style={{ fontSize: ".82rem", fontWeight: 600, color: "var(--text)", padding: "0 6px" }}>
-              Targeting
+              👤 Cílové publikum
             </legend>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "12px" }}>
               <div>
@@ -957,13 +1029,238 @@ function CampaignWizard({ adAccountId, onClose, onCreated }) {
                 </select>
               </div>
             </div>
-            <div style={{ marginTop: "12px" }}>
-              <label style={labelStyle}>Země (kódy oddělené čárkou)</label>
-              <input type="text" value={adSetForm.countries}
-                onChange={e => setAdSetForm(f => ({ ...f, countries: e.target.value }))}
-                placeholder="CZ, SK" style={inputStyle}
-              />
+          </fieldset>
+
+          {/* ═══ GEO TARGETING ═══ */}
+          <fieldset style={{ border: "1px solid var(--border)", borderRadius: "8px", padding: "16px" }}>
+            <legend style={{ fontSize: ".82rem", fontWeight: 600, color: "var(--text)", padding: "0 6px" }}>
+              🌍 Geografické cílení
+            </legend>
+
+            {/* Režim */}
+            <div style={{ display: "flex", gap: "6px", marginBottom: "12px" }}>
+              {[
+                { value: "countries", label: "Podle zemí", icon: "🏳" },
+                { value: "cities", label: "Podle měst", icon: "🏙" },
+                { value: "radius", label: "Radius od bodu", icon: "📍" },
+              ].map(mode => (
+                <button key={mode.value}
+                  onClick={() => setAdSetForm(f => ({ ...f, geoMode: mode.value }))}
+                  style={{
+                    padding: "8px 14px", borderRadius: "6px", fontSize: ".8rem",
+                    border: adSetForm.geoMode === mode.value ? "2px solid #7c3aed" : "1px solid var(--border)",
+                    background: adSetForm.geoMode === mode.value ? "#f5f3ff" : "var(--bg)",
+                    color: adSetForm.geoMode === mode.value ? "#7c3aed" : "var(--text)",
+                    cursor: "pointer", fontWeight: adSetForm.geoMode === mode.value ? 600 : 400,
+                  }}
+                >
+                  {mode.icon} {mode.label}
+                </button>
+              ))}
             </div>
+
+            {/* Podle zemí */}
+            {adSetForm.geoMode === "countries" && (
+              <div>
+                <label style={labelStyle}>Země (ISO kódy oddělené čárkou)</label>
+                <input type="text" value={adSetForm.countries}
+                  onChange={e => setAdSetForm(f => ({ ...f, countries: e.target.value }))}
+                  placeholder="CZ, SK, DE, AT" style={inputStyle}
+                />
+                <p style={{ fontSize: ".72rem", color: "var(--text-muted)", marginTop: "4px" }}>
+                  Příklady: CZ (Česko), SK (Slovensko), DE (Německo), PT (Portugalsko), IT (Itálie), ES (Španělsko)
+                </p>
+              </div>
+            )}
+
+            {/* Podle měst */}
+            {adSetForm.geoMode === "cities" && (
+              <div style={{ display: "grid", gap: "10px" }}>
+                <div>
+                  <label style={labelStyle}>Města (oddělená čárkou)</label>
+                  <input type="text" value={adSetForm.cities}
+                    onChange={e => setAdSetForm(f => ({ ...f, cities: e.target.value }))}
+                    placeholder="Praha, Brno, Ostrava" style={inputStyle}
+                  />
+                </div>
+                <div>
+                  <label style={labelStyle}>Země (volitelné, upřesní vyhledávání)</label>
+                  <input type="text" value={adSetForm.countries}
+                    onChange={e => setAdSetForm(f => ({ ...f, countries: e.target.value }))}
+                    placeholder="CZ" style={inputStyle}
+                  />
+                </div>
+              </div>
+            )}
+
+            {/* Radius od souřadnic */}
+            {adSetForm.geoMode === "radius" && (
+              <div style={{ display: "grid", gap: "10px" }}>
+                <div>
+                  <label style={labelStyle}>Název místa (volitelný popisek)</label>
+                  <input type="text" value={adSetForm.radiusName}
+                    onChange={e => setAdSetForm(f => ({ ...f, radiusName: e.target.value }))}
+                    placeholder="např. Obchodní centrum Chodov" style={inputStyle}
+                  />
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "10px" }}>
+                  <div>
+                    <label style={labelStyle}>Zeměpisná šířka (lat)</label>
+                    <input type="text" value={adSetForm.radiusLat}
+                      onChange={e => setAdSetForm(f => ({ ...f, radiusLat: e.target.value }))}
+                      placeholder="50.0755" style={inputStyle}
+                    />
+                  </div>
+                  <div>
+                    <label style={labelStyle}>Zeměpisná délka (lng)</label>
+                    <input type="text" value={adSetForm.radiusLng}
+                      onChange={e => setAdSetForm(f => ({ ...f, radiusLng: e.target.value }))}
+                      placeholder="14.4378" style={inputStyle}
+                    />
+                  </div>
+                  <div>
+                    <label style={labelStyle}>Radius (km)</label>
+                    <input type="number" value={adSetForm.radiusKm}
+                      onChange={e => setAdSetForm(f => ({ ...f, radiusKm: e.target.value }))}
+                      placeholder="25" style={inputStyle} min="1" max="80"
+                    />
+                  </div>
+                </div>
+                <p style={{ fontSize: ".72rem", color: "var(--text-muted)" }}>
+                  Souřadnice najdeš na Google Maps — klikni pravým tlačítkem → "Co je tady?"
+                </p>
+              </div>
+            )}
+          </fieldset>
+
+          {/* ═══ PLACEMENTS ═══ */}
+          <fieldset style={{ border: "1px solid var(--border)", borderRadius: "8px", padding: "16px" }}>
+            <legend style={{ fontSize: ".82rem", fontWeight: 600, color: "var(--text)", padding: "0 6px" }}>
+              📱 Umístění reklamy (placements)
+            </legend>
+
+            <div style={{ display: "flex", gap: "6px", marginBottom: "12px" }}>
+              <button
+                onClick={() => setAdSetForm(f => ({ ...f, placementMode: "automatic" }))}
+                style={{
+                  padding: "8px 14px", borderRadius: "6px", fontSize: ".8rem",
+                  border: adSetForm.placementMode === "automatic" ? "2px solid #7c3aed" : "1px solid var(--border)",
+                  background: adSetForm.placementMode === "automatic" ? "#f5f3ff" : "var(--bg)",
+                  color: adSetForm.placementMode === "automatic" ? "#7c3aed" : "var(--text)",
+                  cursor: "pointer", fontWeight: adSetForm.placementMode === "automatic" ? 600 : 400,
+                }}
+              >
+                🤖 Automatické (doporučeno)
+              </button>
+              <button
+                onClick={() => setAdSetForm(f => ({ ...f, placementMode: "manual" }))}
+                style={{
+                  padding: "8px 14px", borderRadius: "6px", fontSize: ".8rem",
+                  border: adSetForm.placementMode === "manual" ? "2px solid #7c3aed" : "1px solid var(--border)",
+                  background: adSetForm.placementMode === "manual" ? "#f5f3ff" : "var(--bg)",
+                  color: adSetForm.placementMode === "manual" ? "#7c3aed" : "var(--text)",
+                  cursor: "pointer", fontWeight: adSetForm.placementMode === "manual" ? 600 : 400,
+                }}
+              >
+                ✋ Manuální
+              </button>
+            </div>
+
+            {adSetForm.placementMode === "automatic" && (
+              <p style={{ fontSize: ".78rem", color: "var(--text-muted)", margin: 0 }}>
+                Facebook automaticky zobrazí reklamu tam, kde bude mít nejlepší výkon.
+              </p>
+            )}
+
+            {adSetForm.placementMode === "manual" && (
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px" }}>
+                {/* Facebook */}
+                <div>
+                  <p style={{ fontSize: ".78rem", fontWeight: 600, color: "var(--text)", margin: "0 0 8px" }}>
+                    📘 Facebook
+                  </p>
+                  {[
+                    { key: "facebook_feed", label: "Feed" },
+                    { key: "facebook_stories", label: "Stories" },
+                    { key: "facebook_reels", label: "Reels" },
+                    { key: "facebook_right_column", label: "Pravý sloupec" },
+                  ].map(item => (
+                    <label key={item.key} style={{
+                      display: "flex", alignItems: "center", gap: "8px",
+                      marginBottom: "6px", fontSize: ".8rem", cursor: "pointer",
+                      color: "var(--text)",
+                    }}>
+                      <input type="checkbox"
+                        checked={adSetForm.placements[item.key]}
+                        onChange={e => setAdSetForm(f => ({
+                          ...f,
+                          placements: { ...f.placements, [item.key]: e.target.checked },
+                        }))}
+                        style={{ accentColor: "#7c3aed" }}
+                      />
+                      {item.label}
+                    </label>
+                  ))}
+                </div>
+
+                {/* Instagram */}
+                <div>
+                  <p style={{ fontSize: ".78rem", fontWeight: 600, color: "var(--text)", margin: "0 0 8px" }}>
+                    📷 Instagram
+                  </p>
+                  {[
+                    { key: "instagram_feed", label: "Feed" },
+                    { key: "instagram_stories", label: "Stories" },
+                    { key: "instagram_reels", label: "Reels" },
+                    { key: "instagram_explore", label: "Explore" },
+                  ].map(item => (
+                    <label key={item.key} style={{
+                      display: "flex", alignItems: "center", gap: "8px",
+                      marginBottom: "6px", fontSize: ".8rem", cursor: "pointer",
+                      color: "var(--text)",
+                    }}>
+                      <input type="checkbox"
+                        checked={adSetForm.placements[item.key]}
+                        onChange={e => setAdSetForm(f => ({
+                          ...f,
+                          placements: { ...f.placements, [item.key]: e.target.checked },
+                        }))}
+                        style={{ accentColor: "#7c3aed" }}
+                      />
+                      {item.label}
+                    </label>
+                  ))}
+                </div>
+
+                {/* Ostatní */}
+                <div style={{ gridColumn: "1 / -1" }}>
+                  <p style={{ fontSize: ".78rem", fontWeight: 600, color: "var(--text)", margin: "0 0 8px" }}>
+                    🌐 Ostatní
+                  </p>
+                  <div style={{ display: "flex", gap: "20px" }}>
+                    {[
+                      { key: "audience_network", label: "Audience Network" },
+                      { key: "messenger", label: "Messenger" },
+                    ].map(item => (
+                      <label key={item.key} style={{
+                        display: "flex", alignItems: "center", gap: "8px",
+                        fontSize: ".8rem", cursor: "pointer", color: "var(--text)",
+                      }}>
+                        <input type="checkbox"
+                          checked={adSetForm.placements[item.key]}
+                          onChange={e => setAdSetForm(f => ({
+                            ...f,
+                            placements: { ...f.placements, [item.key]: e.target.checked },
+                          }))}
+                          style={{ accentColor: "#7c3aed" }}
+                        />
+                        {item.label}
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
           </fieldset>
 
           <div style={{ display: "flex", gap: "8px" }}>
