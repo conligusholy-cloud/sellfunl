@@ -3,6 +3,7 @@ import { useAuthState } from "../../hooks/useAuthState";
 import { useFacebookAuth } from "../../hooks/useFacebookAuth";
 import AdCopyGenerator from "../../components/modules/AdCopyGenerator";
 import AdCreativeGenerator from "../../components/modules/AdCreativeGenerator";
+import CampaignManager from "../../components/modules/CampaignManager";
 
 // ─── Sekce modulu ──────────────────────────────────────────────────────────
 const TABS = [
@@ -72,9 +73,7 @@ export default function FacebookAds() {
       )}
 
       {activeTab === "campaigns" && fbAccount && (
-        <div style={{ padding: "40px", textAlign: "center", color: "var(--text-muted)" }}>
-          📊 Správa kampaní — připravuje se
-        </div>
+        <CampaignManager fbAccount={fbAccount} />
       )}
     </div>
   );

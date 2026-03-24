@@ -561,3 +561,252 @@ Pravidla:
     }
   }
 );
+
+// ─── FACEBOOK ADS: helper pro FB API volání ──────────────────────────────────
+async function fbApi(path, accessToken, params = {}) {
+  const qs = new URLSearchParams({ access_token: accessToken, ...params }).toString();
+  const url = `https://graph.facebook.com/v19.0/${path}?${qs}`;
+  const res = await fetch(url);
+  const data = await res.json();
+  if (data.error) throw new Error(`FB API: ${data.error.message}`);
+  return data;
+}
+
+async function fbApiPost(path, accessToken, body = {}) {
+  const url = `https://graph.facebook.com/v19.0/${path}`;
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ access_token: accessToken, ...body }),
+  });
+  const data = await res.json();
+  if (data.error) throw new Error(`FB API: ${data.error.message}`);
+  return data;
+}
+
+// Helper: získej access token z Firestore
+async function getFbToken(uid) {
+  const db = admin.firestore();
+  const docSnap = await db.collection("facebookAccounts").doc(uid).get();
+  if (!docSnap.exists) throw new HttpsError("failed-precondition", "Facebook účet není propojený.");
+  const { accessToken, adAccounts } = docSnap.data();
+  if (!accessToken) throw new HttpsError("failed-precondition", "Chybí Facebook access token.");
+  return { accessToken, adAccounts: adAccounts || [] };
+}
+
+// ─── FACEBOOK ADS: načti kampaně ─────────────────────────────────────────────
+exports.fbListCampaigns = onCall(
+  { secrets: [FB_APP_ID], timeoutSeconds: 30 },
+  async (request) => {
+    if (!request.auth) throw new HttpsError("unauthenticated", "Musíš být přihlášen.");
+    const { adAccountId } = request.data;
+    if (!adAccountId) throw new HttpsError("invalid-argument", "Chybí ID reklamního účtu.");
+
+    const { accessToken } = await getFbToken(request.auth.uid);
+
+    const campaigns = await fbApi(`${adAccountId}/campaigns`, accessToken, {
+      fields: "id,name,status,objective,daily_budget,lifetime_budget,created_time,updated_time,start_time,stop_time",
+      limit: "50",
+    });
+
+    const results = [];
+    for (const c of (campaigns.data || [])) {
+      let adSetCount = 0;
+      try {
+        const adSets = await fbApi(`${c.id}/adsets`, accessToken, { fields: "id", limit: "100" });
+        adSetCount = adSets.data?.length || 0;
+      } catch { /* ignore */ }
+      results.push({ ...c, adSetCount });
+    }
+
+    return { campaigns: results };
+  }
+);
+
+// ─── FACEBOOK ADS: načti ad sety kampaně ─────────────────────────────────────
+exports.fbListAdSets = onCall(
+  { secrets: [FB_APP_ID], timeoutSeconds: 30 },
+  async (request) => {
+    if (!request.auth) throw new HttpsError("unauthenticated", "Musíš být přihlášen.");
+    const { campaignId } = request.data;
+    if (!campaignId) throw new HttpsError("invalid-argument", "Chybí ID kampaně.");
+
+    const { accessToken } = await getFbToken(request.auth.uid);
+
+    const adSets = await fbApi(`${campaignId}/adsets`, accessToken, {
+      fields: "id,name,status,daily_budget,lifetime_budget,targeting,optimization_goal,billing_event,start_time,end_time",
+      limit: "50",
+    });
+
+    return { adSets: adSets.data || [] };
+  }
+);
+
+// ─── FACEBOOK ADS: načti reklamy ad setu ─────────────────────────────────────
+exports.fbListAds = onCall(
+  { secrets: [FB_APP_ID], timeoutSeconds: 30 },
+  async (request) => {
+    if (!request.auth) throw new HttpsError("unauthenticated", "Musíš být přihlášen.");
+    const { adSetId } = request.data;
+    if (!adSetId) throw new HttpsError("invalid-argument", "Chybí ID ad setu.");
+
+    const { accessToken } = await getFbToken(request.auth.uid);
+
+    const ads = await fbApi(`${adSetId}/ads`, accessToken, {
+      fields: "id,name,status,creative{id,name,title,body,image_url,thumbnail_url}",
+      limit: "50",
+    });
+
+    return { ads: ads.data || [] };
+  }
+);
+
+// ─── FACEBOOK ADS: vytvoř kampaň ────────────────────────────────────────────
+exports.fbCreateCampaign = onCall(
+  { secrets: [FB_APP_ID], timeoutSeconds: 30 },
+  async (request) => {
+    if (!request.auth) throw new HttpsError("unauthenticated", "Musíš být přihlášen.");
+    const { adAccountId, name, objective, dailyBudget, status = "PAUSED" } = request.data;
+    if (!adAccountId || !name || !objective) {
+      throw new HttpsError("invalid-argument", "Chybí povinné parametry (adAccountId, name, objective).");
+    }
+
+    const { accessToken } = await getFbToken(request.auth.uid);
+
+    const body = {
+      name,
+      objective,
+      status,
+      special_ad_categories: [],
+    };
+    if (dailyBudget) body.daily_budget = Math.round(dailyBudget * 100);
+
+    const result = await fbApiPost(`${adAccountId}/campaigns`, accessToken, body);
+    return { campaignId: result.id };
+  }
+);
+
+// ─── FACEBOOK ADS: vytvoř ad set ─────────────────────────────────────────────
+exports.fbCreateAdSet = onCall(
+  { secrets: [FB_APP_ID], timeoutSeconds: 30 },
+  async (request) => {
+    if (!request.auth) throw new HttpsError("unauthenticated", "Musíš být přihlášen.");
+    const {
+      adAccountId, campaignId, name, dailyBudget,
+      optimizationGoal, billingEvent = "IMPRESSIONS",
+      targeting, startTime, endTime, status = "PAUSED",
+    } = request.data;
+
+    if (!adAccountId || !campaignId || !name || !targeting) {
+      throw new HttpsError("invalid-argument", "Chybí povinné parametry.");
+    }
+
+    const { accessToken } = await getFbToken(request.auth.uid);
+
+    const body = {
+      campaign_id: campaignId,
+      name,
+      status,
+      optimization_goal: optimizationGoal || "LINK_CLICKS",
+      billing_event: billingEvent,
+      targeting,
+    };
+    if (dailyBudget) body.daily_budget = Math.round(dailyBudget * 100);
+    if (startTime) body.start_time = startTime;
+    if (endTime) body.end_time = endTime;
+
+    const result = await fbApiPost(`${adAccountId}/adsets`, accessToken, body);
+    return { adSetId: result.id };
+  }
+);
+
+// ─── FACEBOOK ADS: vytvoř reklamu (ad creative + ad) ─────────────────────────
+exports.fbCreateAd = onCall(
+  { secrets: [FB_APP_ID], timeoutSeconds: 30 },
+  async (request) => {
+    if (!request.auth) throw new HttpsError("unauthenticated", "Musíš být přihlášen.");
+    const {
+      adAccountId, adSetId, name,
+      pageId, linkUrl, message, headline, description, callToAction,
+      imageUrl,
+    } = request.data;
+
+    if (!adAccountId || !adSetId || !name || !pageId || !linkUrl) {
+      throw new HttpsError("invalid-argument", "Chybí povinné parametry.");
+    }
+
+    const { accessToken } = await getFbToken(request.auth.uid);
+
+    const creativeBody = {
+      name: `Creative - ${name}`,
+      object_story_spec: {
+        page_id: pageId,
+        link_data: {
+          link: linkUrl,
+          message: message || "",
+          name: headline || "",
+          description: description || "",
+          call_to_action: callToAction ? { type: callToAction } : { type: "LEARN_MORE" },
+        },
+      },
+    };
+    if (imageUrl) creativeBody.object_story_spec.link_data.image_url = imageUrl;
+
+    const creative = await fbApiPost(`${adAccountId}/adcreatives`, accessToken, creativeBody);
+
+    const adBody = {
+      name,
+      adset_id: adSetId,
+      creative: { creative_id: creative.id },
+      status: "PAUSED",
+    };
+
+    const ad = await fbApiPost(`${adAccountId}/ads`, accessToken, adBody);
+    return { adId: ad.id, creativeId: creative.id };
+  }
+);
+
+// ─── FACEBOOK ADS: změň status kampaně/ad setu/reklamy ──────────────────────
+exports.fbUpdateStatus = onCall(
+  { secrets: [FB_APP_ID], timeoutSeconds: 15 },
+  async (request) => {
+    if (!request.auth) throw new HttpsError("unauthenticated", "Musíš být přihlášen.");
+    const { objectId, status } = request.data;
+    if (!objectId || !status) throw new HttpsError("invalid-argument", "Chybí objectId nebo status.");
+
+    const allowed = ["ACTIVE", "PAUSED", "ARCHIVED"];
+    if (!allowed.includes(status)) {
+      throw new HttpsError("invalid-argument", `Status musí být: ${allowed.join(", ")}`);
+    }
+
+    const { accessToken } = await getFbToken(request.auth.uid);
+
+    const url = `https://graph.facebook.com/v19.0/${objectId}`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ access_token: accessToken, status }),
+    });
+    const data = await res.json();
+    if (data.error) throw new HttpsError("internal", `FB API: ${data.error.message}`);
+
+    return { success: true };
+  }
+);
+
+// ─── FACEBOOK ADS: načti FB stránky uživatele ───────────────────────────────
+exports.fbListPages = onCall(
+  { secrets: [FB_APP_ID], timeoutSeconds: 15 },
+  async (request) => {
+    if (!request.auth) throw new HttpsError("unauthenticated", "Musíš být přihlášen.");
+
+    const { accessToken } = await getFbToken(request.auth.uid);
+
+    const pages = await fbApi("me/accounts", accessToken, {
+      fields: "id,name,category,picture{url}",
+      limit: "50",
+    });
+
+    return { pages: pages.data || [] };
+  }
+);

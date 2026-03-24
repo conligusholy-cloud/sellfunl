@@ -14,7 +14,7 @@ export default defineConfig(({ mode }) => {
           rewrite: (path) => path.replace(/^\/api\/anthropic/, ''),
           secure: true,
           headers: {
-            'x-api-key': env.VITE_ANTHROPIC_KEY,
+            'x-api-key': env.ANTHROPIC_KEY,
             'anthropic-version': '2023-06-01',
           }
         }
