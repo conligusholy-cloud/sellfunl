@@ -118,6 +118,15 @@ export default function CampaignManager({ fbAccount }) {
     }
   }
 
+  async function deleteObject(objectId) {
+    try {
+      await call("fbDeleteObject")({ objectId });
+      loadCampaigns();
+    } catch (err) {
+      alert(`Chyba při mazání: ${err.message}`);
+    }
+  }
+
   const adAccounts = fbAccount?.adAccounts || [];
 
   return (
@@ -203,6 +212,7 @@ export default function CampaignManager({ fbAccount }) {
               expanded={expandedCampaign === c.id}
               onToggle={() => setExpandedCampaign(expandedCampaign === c.id ? null : c.id)}
               onStatusChange={updateStatus}
+              onDelete={deleteObject}
             />
           ))}
         </div>
@@ -233,7 +243,7 @@ function EmptyState({ onNew }) {
 }
 
 // ─── Řádek kampaně ───────────────────────────────────────────────────────────
-function CampaignRow({ campaign, expanded, onToggle, onStatusChange }) {
+function CampaignRow({ campaign, expanded, onToggle, onStatusChange, onDelete }) {
   const st = STATUS_MAP[campaign.status] || STATUS_MAP.PAUSED;
   const obj = OBJECTIVES.find(o => o.value === campaign.objective);
   const budget = campaign.daily_budget
@@ -278,14 +288,14 @@ function CampaignRow({ campaign, expanded, onToggle, onStatusChange }) {
 
       {/* Detail */}
       {expanded && (
-        <CampaignDetail campaign={campaign} onStatusChange={onStatusChange} />
+        <CampaignDetail campaign={campaign} onStatusChange={onStatusChange} onDelete={onDelete} />
       )}
     </div>
   );
 }
 
 // ─── Detail kampaně (ad sety, reklamy) ───────────────────────────────────────
-function CampaignDetail({ campaign, onStatusChange }) {
+function CampaignDetail({ campaign, onStatusChange, onDelete }) {
   const [adSets, setAdSets] = useState([]);
   const [loading, setLoading] = useState(true);
   const [expandedAdSet, setExpandedAdSet] = useState(null);
@@ -310,7 +320,7 @@ function CampaignDetail({ campaign, onStatusChange }) {
   return (
     <div style={{ padding: "0 20px 16px", borderTop: "1px solid var(--border)" }}>
       {/* Akce kampaně */}
-      <div style={{ display: "flex", gap: "8px", padding: "12px 0" }}>
+      <div style={{ display: "flex", gap: "8px", padding: "12px 0", flexWrap: "wrap" }}>
         {isPaused && (
           <button onClick={() => onStatusChange(campaign.id, "ACTIVE")} style={{ ...btnSmall, color: "#16a34a", borderColor: "#16a34a" }}>
             ▶ Aktivovat
@@ -327,6 +337,13 @@ function CampaignDetail({ campaign, onStatusChange }) {
           }
         }} style={{ ...btnSmall, color: "#6b7280", borderColor: "#6b7280" }}>
           📦 Archivovat
+        </button>
+        <button onClick={() => {
+          if (window.confirm(`Opravdu smazat kampaň "${campaign.name}"? Smaže se i vše pod ní (ad sety, reklamy). Tuto akci nelze vrátit!`)) {
+            onDelete(campaign.id);
+          }
+        }} style={{ ...btnSmall, color: "#ef4444", borderColor: "#ef4444", marginLeft: "auto" }}>
+          🗑 Smazat
         </button>
       </div>
 
@@ -348,6 +365,7 @@ function CampaignDetail({ campaign, onStatusChange }) {
               expanded={expandedAdSet === as.id}
               onToggle={() => setExpandedAdSet(expandedAdSet === as.id ? null : as.id)}
               onStatusChange={onStatusChange}
+              onDelete={onDelete}
             />
           ))}
         </div>
@@ -357,13 +375,13 @@ function CampaignDetail({ campaign, onStatusChange }) {
 }
 
 // ─── Ad Set řádek ────────────────────────────────────────────────────────────
-function AdSetRow({ adSet, expanded, onToggle, onStatusChange }) {
+function AdSetRow({ adSet, expanded, onToggle, onStatusChange, onDelete }) {
   const st = STATUS_MAP[adSet.status] || STATUS_MAP.PAUSED;
   const budget = adSet.daily_budget
     ? `${(adSet.daily_budget / 100).toFixed(0)} Kč/den`
     : adSet.lifetime_budget
     ? `${(adSet.lifetime_budget / 100).toFixed(0)} Kč celkem`
-    : "—";
+    : "CBO";
 
   return (
     <div style={{
@@ -382,13 +400,13 @@ function AdSetRow({ adSet, expanded, onToggle, onStatusChange }) {
         <span style={{ fontSize: ".7rem", color: "var(--text-muted)" }}>{expanded ? "▲" : "▼"}</span>
       </div>
 
-      {expanded && <AdSetDetail adSet={adSet} onStatusChange={onStatusChange} />}
+      {expanded && <AdSetDetail adSet={adSet} onStatusChange={onStatusChange} onDelete={onDelete} />}
     </div>
   );
 }
 
 // ─── Ad Set detail (reklamy) ─────────────────────────────────────────────────
-function AdSetDetail({ adSet, onStatusChange }) {
+function AdSetDetail({ adSet, onStatusChange, onDelete }) {
   const [ads, setAds] = useState([]);
   const [loading, setLoading] = useState(true);
 
@@ -406,9 +424,28 @@ function AdSetDetail({ adSet, onStatusChange }) {
     load();
   }, [adSet.id]);
 
+  // Targeting info
+  const tgt = adSet.targeting || {};
+  const ageRange = tgt.age_min && tgt.age_max ? `${tgt.age_min}–${tgt.age_max} let` : "";
+  const countries = tgt.geo_locations?.countries?.join(", ") || "";
+  const optGoal = OPTIMIZATION_GOALS.find(g => g.value === adSet.optimization_goal);
+
   return (
     <div style={{ padding: "8px 14px 14px", borderTop: "1px solid var(--border)" }}>
-      <div style={{ display: "flex", gap: "6px", marginBottom: "10px" }}>
+      {/* Targeting info */}
+      {(ageRange || countries || optGoal) && (
+        <div style={{
+          padding: "8px 12px", borderRadius: "6px", background: "#f8fafc",
+          marginBottom: "10px", fontSize: ".78rem", color: "var(--text-muted)",
+          display: "flex", gap: "16px", flexWrap: "wrap",
+        }}>
+          {countries && <span>🌍 {countries}</span>}
+          {ageRange && <span>👤 {ageRange}</span>}
+          {optGoal && <span>🎯 {optGoal.label}</span>}
+        </div>
+      )}
+
+      <div style={{ display: "flex", gap: "6px", marginBottom: "10px", flexWrap: "wrap" }}>
         {adSet.status === "PAUSED" && (
           <button onClick={() => onStatusChange(adSet.id, "ACTIVE")} style={{ ...btnSmall, fontSize: ".75rem", color: "#16a34a", borderColor: "#16a34a" }}>
             ▶ Aktivovat
@@ -419,6 +456,11 @@ function AdSetDetail({ adSet, onStatusChange }) {
             ⏸ Pozastavit
           </button>
         )}
+        <button onClick={() => {
+          if (window.confirm(`Smazat ad set "${adSet.name}"?`)) onDelete(adSet.id);
+        }} style={{ ...btnSmall, fontSize: ".75rem", color: "#ef4444", borderColor: "#ef4444", marginLeft: "auto" }}>
+          🗑 Smazat
+        </button>
       </div>
 
       <p style={{ fontSize: ".78rem", fontWeight: 600, color: "var(--text)", margin: "0 0 6px" }}>
@@ -430,33 +472,152 @@ function AdSetDetail({ adSet, onStatusChange }) {
       ) : ads.length === 0 ? (
         <p style={{ fontSize: ".78rem", color: "var(--text-muted)", fontStyle: "italic" }}>Žádné reklamy.</p>
       ) : (
-        ads.map(ad => {
-          const ast = STATUS_MAP[ad.status] || STATUS_MAP.PAUSED;
-          return (
-            <div key={ad.id} style={{
-              display: "flex", alignItems: "center", gap: "8px",
-              padding: "8px 10px", borderRadius: "6px", background: "var(--bg-card)",
-              marginBottom: "6px", fontSize: ".82rem",
-            }}>
-              {ad.creative?.thumbnail_url && (
-                <img src={ad.creative.thumbnail_url} alt="" style={{
-                  width: "36px", height: "36px", borderRadius: "4px", objectFit: "cover",
-                }} />
-              )}
-              <span style={{ flex: 1, color: "var(--text)", fontWeight: 500 }}>{ad.name}</span>
-              <span style={{
-                padding: "2px 6px", borderRadius: "10px", fontSize: ".68rem", fontWeight: 600,
-                background: ast.bg, color: ast.color,
-              }}>{ast.label}</span>
-              {ad.status === "PAUSED" && (
-                <button onClick={() => onStatusChange(ad.id, "ACTIVE")} style={{ ...btnSmall, fontSize: ".7rem", padding: "2px 6px", color: "#16a34a", borderColor: "#16a34a" }}>▶</button>
-              )}
-              {ad.status === "ACTIVE" && (
-                <button onClick={() => onStatusChange(ad.id, "PAUSED")} style={{ ...btnSmall, fontSize: ".7rem", padding: "2px 6px", color: "#d97706", borderColor: "#d97706" }}>⏸</button>
+        ads.map(ad => <AdRow key={ad.id} ad={ad} onStatusChange={onStatusChange} onDelete={onDelete} />)
+      )}
+    </div>
+  );
+}
+
+// ─── Řádek reklamy s náhledem ────────────────────────────────────────────────
+function AdRow({ ad, onStatusChange, onDelete }) {
+  const ast = STATUS_MAP[ad.status] || STATUS_MAP.PAUSED;
+  const [showPreview, setShowPreview] = useState(false);
+  const [previewHtml, setPreviewHtml] = useState(null);
+  const [loadingPreview, setLoadingPreview] = useState(false);
+  const [previewFormat, setPreviewFormat] = useState("DESKTOP_FEED_STANDARD");
+
+  const creative = ad.creative || {};
+  const storySpec = creative.object_story_spec?.link_data || {};
+  const assetSpec = creative.asset_feed_spec || null;
+
+  // Texts from creative
+  const primaryText = storySpec.message || (assetSpec?.bodies?.[0]?.text) || "";
+  const headlineText = storySpec.name || (assetSpec?.titles?.[0]?.text) || creative.title || "";
+  const descText = storySpec.description || (assetSpec?.descriptions?.[0]?.text) || "";
+  const imageUrl = creative.image_url || creative.thumbnail_url || storySpec.picture || "";
+
+  async function loadPreview(format) {
+    setLoadingPreview(true);
+    setPreviewFormat(format);
+    try {
+      const { data } = await call("fbGetAdPreview")({ adId: ad.id, format });
+      if (data.previews?.length > 0) {
+        setPreviewHtml(data.previews[0].body);
+      } else {
+        setPreviewHtml("<p style='padding:20px;color:#888;'>Náhled není k dispozici.</p>");
+      }
+    } catch (err) {
+      setPreviewHtml(`<p style='padding:20px;color:#ef4444;'>Chyba: ${err.message}</p>`);
+    } finally {
+      setLoadingPreview(false);
+    }
+  }
+
+  const PREVIEW_FORMATS = [
+    { value: "DESKTOP_FEED_STANDARD", label: "Feed (desktop)" },
+    { value: "MOBILE_FEED_STANDARD", label: "Feed (mobil)" },
+    { value: "INSTAGRAM_STANDARD", label: "Instagram" },
+    { value: "INSTAGRAM_STORY", label: "Story" },
+  ];
+
+  return (
+    <div style={{
+      borderRadius: "8px", background: "var(--bg-card)", border: "1px solid var(--border)",
+      marginBottom: "8px", overflow: "hidden",
+    }}>
+      {/* Ad header */}
+      <div style={{
+        display: "flex", alignItems: "center", gap: "10px",
+        padding: "10px 12px", fontSize: ".82rem",
+      }}>
+        {imageUrl && (
+          <img src={imageUrl} alt="" style={{
+            width: "48px", height: "48px", borderRadius: "6px", objectFit: "cover",
+            border: "1px solid var(--border)",
+          }} />
+        )}
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <p style={{ fontWeight: 600, color: "var(--text)", margin: "0 0 2px", fontSize: ".85rem" }}>{ad.name}</p>
+          {headlineText && (
+            <p style={{ fontSize: ".75rem", color: "var(--text-muted)", margin: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {headlineText}
+            </p>
+          )}
+        </div>
+        <span style={{
+          padding: "2px 8px", borderRadius: "10px", fontSize: ".68rem", fontWeight: 600,
+          background: ast.bg, color: ast.color,
+        }}>{ast.label}</span>
+
+        {/* Akce */}
+        {ad.status === "PAUSED" && (
+          <button onClick={() => onStatusChange(ad.id, "ACTIVE")} style={{ ...btnSmall, fontSize: ".7rem", padding: "2px 6px", color: "#16a34a", borderColor: "#16a34a" }} title="Aktivovat">▶</button>
+        )}
+        {ad.status === "ACTIVE" && (
+          <button onClick={() => onStatusChange(ad.id, "PAUSED")} style={{ ...btnSmall, fontSize: ".7rem", padding: "2px 6px", color: "#d97706", borderColor: "#d97706" }} title="Pozastavit">⏸</button>
+        )}
+        <button onClick={() => {
+          if (!showPreview) loadPreview(previewFormat);
+          setShowPreview(!showPreview);
+        }} style={{ ...btnSmall, fontSize: ".7rem", padding: "2px 6px", color: "#7c3aed", borderColor: "#7c3aed" }} title="Náhled">
+          👁
+        </button>
+        <button onClick={() => {
+          if (window.confirm(`Smazat reklamu "${ad.name}"?`)) onDelete(ad.id);
+        }} style={{ ...btnSmall, fontSize: ".7rem", padding: "2px 6px", color: "#ef4444", borderColor: "#ef4444" }} title="Smazat">
+          🗑
+        </button>
+      </div>
+
+      {/* Rozbalený náhled */}
+      {showPreview && (
+        <div style={{ borderTop: "1px solid var(--border)", padding: "12px" }}>
+          {/* Vizualizace z dat kreativy */}
+          <div style={{
+            display: "grid", gridTemplateColumns: imageUrl ? "120px 1fr" : "1fr", gap: "12px",
+            padding: "12px", borderRadius: "8px", background: "#f8fafc", marginBottom: "12px",
+            border: "1px solid #e5e7eb",
+          }}>
+            {imageUrl && (
+              <img src={imageUrl} alt="" style={{ width: "100%", borderRadius: "6px", objectFit: "cover" }} />
+            )}
+            <div>
+              {primaryText && <p style={{ fontSize: ".82rem", color: "var(--text)", margin: "0 0 6px" }}>{primaryText}</p>}
+              {headlineText && <p style={{ fontSize: ".9rem", fontWeight: 700, color: "var(--text)", margin: "0 0 4px" }}>{headlineText}</p>}
+              {descText && <p style={{ fontSize: ".78rem", color: "var(--text-muted)", margin: 0 }}>{descText}</p>}
+              {storySpec.link && (
+                <p style={{ fontSize: ".72rem", color: "#7c3aed", margin: "6px 0 0" }}>{storySpec.link}</p>
               )}
             </div>
-          );
-        })
+          </div>
+
+          {/* FB Preview iframe */}
+          <div style={{ marginBottom: "8px" }}>
+            <div style={{ display: "flex", gap: "6px", marginBottom: "8px", flexWrap: "wrap" }}>
+              {PREVIEW_FORMATS.map(f => (
+                <button key={f.value} onClick={() => loadPreview(f.value)}
+                  style={{
+                    ...btnSmall, fontSize: ".72rem", padding: "3px 8px",
+                    color: previewFormat === f.value ? "#fff" : "#7c3aed",
+                    background: previewFormat === f.value ? "#7c3aed" : "transparent",
+                    borderColor: "#7c3aed",
+                  }}>
+                  {f.label}
+                </button>
+              ))}
+            </div>
+            {loadingPreview ? (
+              <div style={{ padding: "20px", textAlign: "center", color: "var(--text-muted)", fontSize: ".82rem" }}>
+                ⏳ Načítám náhled z Facebooku...
+              </div>
+            ) : previewHtml ? (
+              <div
+                dangerouslySetInnerHTML={{ __html: previewHtml }}
+                style={{ borderRadius: "8px", overflow: "hidden", border: "1px solid #e5e7eb" }}
+              />
+            ) : null}
+          </div>
+        </div>
       )}
     </div>
   );
@@ -481,8 +642,16 @@ function CampaignWizard({ adAccountId, onClose, onCreated }) {
 
   // Krok 3: Reklama
   const [adForm, setAdForm] = useState({
-    name: "", pageId: "", linkUrl: "", message: "", headline: "", description: "", cta: "LEARN_MORE",
+    name: "", pageId: "", linkUrl: "", cta: "LEARN_MORE",
+    messages: [""],        // max 3
+    headlines: [""],       // max 5
+    descriptions: [""],    // max 3
   });
+  const [mediaSlots, setMediaSlots] = useState([
+    { label: "Čtverec (1:1)", ratio: "1:1", file: null, preview: null, hash: null, uploading: false },
+    { label: "Story (9:16)", ratio: "9:16", file: null, preview: null, hash: null, uploading: false },
+    { label: "Landscape (1.91:1)", ratio: "1.91:1", file: null, preview: null, hash: null, uploading: false },
+  ]);
 
   // Načti FB stránky
   useEffect(() => {
@@ -558,20 +727,82 @@ function CampaignWizard({ adAccountId, onClose, onCreated }) {
     }
   }
 
+  async function uploadMedia(slotIndex) {
+    const slot = mediaSlots[slotIndex];
+    if (!slot.file) return;
+    const updated = [...mediaSlots];
+    updated[slotIndex] = { ...slot, uploading: true };
+    setMediaSlots(updated);
+
+    try {
+      // Convert file to base64
+      const reader = new FileReader();
+      const base64 = await new Promise((resolve, reject) => {
+        reader.onload = () => resolve(reader.result.split(",")[1]);
+        reader.onerror = reject;
+        reader.readAsDataURL(slot.file);
+      });
+
+      const { data } = await call("fbUploadAdImage")({
+        adAccountId,
+        imageBase64: base64,
+        filename: slot.file.name,
+      });
+
+      const final = [...mediaSlots];
+      final[slotIndex] = { ...final[slotIndex], hash: data.hash, uploading: false };
+      setMediaSlots(final);
+    } catch (err) {
+      alert(`Upload selhал: ${err.message}`);
+      const final = [...mediaSlots];
+      final[slotIndex] = { ...final[slotIndex], uploading: false };
+      setMediaSlots(final);
+    }
+  }
+
+  function handleMediaFile(slotIndex, file) {
+    if (!file) return;
+    const preview = URL.createObjectURL(file);
+    const updated = [...mediaSlots];
+    updated[slotIndex] = { ...updated[slotIndex], file, preview, hash: null };
+    setMediaSlots(updated);
+  }
+
   async function createAd() {
     if (!adForm.name || !adForm.pageId || !adForm.linkUrl) return alert("Vyplň název, FB stránku a odkaz.");
+
+    // Upload media that hasn't been uploaded yet
+    const pendingUploads = mediaSlots
+      .map((s, i) => (s.file && !s.hash ? i : null))
+      .filter(i => i !== null);
+
+    if (pendingUploads.length > 0) {
+      setSaving(true);
+      try {
+        for (const idx of pendingUploads) {
+          await uploadMedia(idx);
+        }
+      } catch (err) {
+        setSaving(false);
+        return;
+      }
+    }
+
     setSaving(true);
     try {
+      const imageHashes = mediaSlots.filter(s => s.hash).map(s => s.hash);
+
       await call("fbCreateAd")({
         adAccountId,
         adSetId: createdIds.adSetId,
         name: adForm.name,
         pageId: adForm.pageId,
         linkUrl: adForm.linkUrl,
-        message: adForm.message,
-        headline: adForm.headline,
-        description: adForm.description,
+        messages: adForm.messages.filter(Boolean),
+        headlines: adForm.headlines.filter(Boolean),
+        descriptions: adForm.descriptions.filter(Boolean),
         callToAction: adForm.cta,
+        imageHashes,
       });
       setStep(4);
     } catch (err) {
@@ -794,29 +1025,177 @@ function CampaignWizard({ adAccountId, onClose, onCreated }) {
               placeholder="https://tvuj-web.cz" style={inputStyle}
             />
           </div>
+
+          {/* === MÉDIA (3 formáty) === */}
           <div>
-            <label style={labelStyle}>Primární text reklamy</label>
-            <textarea value={adForm.message}
-              onChange={e => setAdForm(f => ({ ...f, message: e.target.value }))}
-              placeholder="Hlavní text, který uvidí uživatelé (z tab Texty reklam)" rows={2}
-              style={{ ...inputStyle, resize: "vertical" }}
-            />
+            <label style={labelStyle}>Média (obrázky / kreativy)</label>
+            <p style={{ fontSize: ".75rem", color: "var(--text-muted)", marginBottom: "8px" }}>
+              Nahraj kreativy ve 3 formátech. Facebook si vybere nejlepší pro daný placement.
+            </p>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "12px" }}>
+              {mediaSlots.map((slot, idx) => (
+                <div key={idx} style={{
+                  border: "2px dashed #d1d5db", borderRadius: "8px", padding: "12px",
+                  textAlign: "center", position: "relative",
+                  background: slot.preview ? "#f9fafb" : "transparent",
+                }}>
+                  <div style={{ fontSize: ".75rem", fontWeight: 600, color: "#6b7280", marginBottom: "6px" }}>
+                    {slot.label}
+                  </div>
+                  {slot.preview ? (
+                    <div style={{ position: "relative" }}>
+                      <img src={slot.preview} alt={slot.label}
+                        style={{ maxWidth: "100%", maxHeight: "120px", borderRadius: "4px", objectFit: "contain" }}
+                      />
+                      {slot.hash && (
+                        <div style={{
+                          position: "absolute", top: 4, right: 4,
+                          background: "#16a34a", color: "#fff", borderRadius: "50%",
+                          width: 20, height: 20, fontSize: "12px",
+                          display: "flex", alignItems: "center", justifyContent: "center",
+                        }}>✓</div>
+                      )}
+                      {slot.uploading && (
+                        <div style={{
+                          position: "absolute", inset: 0, background: "rgba(255,255,255,.7)",
+                          display: "flex", alignItems: "center", justifyContent: "center",
+                          borderRadius: "4px", fontSize: ".8rem",
+                        }}>⏳ Nahrávám...</div>
+                      )}
+                      <button onClick={() => {
+                        const updated = [...mediaSlots];
+                        updated[idx] = { ...slot, file: null, preview: null, hash: null };
+                        setMediaSlots(updated);
+                      }} style={{
+                        position: "absolute", top: 4, left: 4,
+                        background: "#ef4444", color: "#fff", border: "none", borderRadius: "50%",
+                        width: 20, height: 20, fontSize: "12px", cursor: "pointer",
+                        display: "flex", alignItems: "center", justifyContent: "center",
+                      }}>✕</button>
+                    </div>
+                  ) : (
+                    <label style={{
+                      display: "block", padding: "16px 8px", cursor: "pointer",
+                      fontSize: ".78rem", color: "#7c3aed",
+                    }}>
+                      📁 Nahrát
+                      <input type="file" accept="image/*" style={{ display: "none" }}
+                        onChange={e => handleMediaFile(idx, e.target.files[0])}
+                      />
+                    </label>
+                  )}
+                </div>
+              ))}
+            </div>
           </div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
-            <div>
-              <label style={labelStyle}>Nadpis</label>
-              <input type="text" value={adForm.headline}
-                onChange={e => setAdForm(f => ({ ...f, headline: e.target.value }))}
-                placeholder="Krátký nadpis" style={inputStyle}
-              />
-            </div>
-            <div>
-              <label style={labelStyle}>Popisek</label>
-              <input type="text" value={adForm.description}
-                onChange={e => setAdForm(f => ({ ...f, description: e.target.value }))}
-                placeholder="Doplňující text" style={inputStyle}
-              />
-            </div>
+
+          {/* === PRIMÁRNÍ TEXTY (max 3) === */}
+          <div>
+            <label style={labelStyle}>
+              Primární texty reklamy
+              <span style={{ fontWeight: 400, color: "var(--text-muted)", fontSize: ".75rem", marginLeft: "6px" }}>
+                ({adForm.messages.length}/3)
+              </span>
+            </label>
+            {adForm.messages.map((msg, idx) => (
+              <div key={idx} style={{ display: "flex", gap: "6px", marginBottom: "6px" }}>
+                <textarea value={msg}
+                  onChange={e => {
+                    const updated = [...adForm.messages];
+                    updated[idx] = e.target.value;
+                    setAdForm(f => ({ ...f, messages: updated }));
+                  }}
+                  placeholder={`Primární text ${idx + 1}`} rows={2}
+                  style={{ ...inputStyle, resize: "vertical", flex: 1 }}
+                />
+                {adForm.messages.length > 1 && (
+                  <button onClick={() => {
+                    setAdForm(f => ({ ...f, messages: f.messages.filter((_, i) => i !== idx) }));
+                  }} style={{
+                    background: "none", border: "none", color: "#ef4444",
+                    cursor: "pointer", fontSize: "1.1rem", padding: "0 4px",
+                  }}>✕</button>
+                )}
+              </div>
+            ))}
+            {adForm.messages.length < 3 && (
+              <button onClick={() => setAdForm(f => ({ ...f, messages: [...f.messages, ""] }))}
+                style={{ ...btnSecondary, fontSize: ".78rem", padding: "4px 10px" }}>
+                + Přidat text
+              </button>
+            )}
+          </div>
+
+          {/* === NADPISY (max 5) === */}
+          <div>
+            <label style={labelStyle}>
+              Nadpisy
+              <span style={{ fontWeight: 400, color: "var(--text-muted)", fontSize: ".75rem", marginLeft: "6px" }}>
+                ({adForm.headlines.length}/5)
+              </span>
+            </label>
+            {adForm.headlines.map((h, idx) => (
+              <div key={idx} style={{ display: "flex", gap: "6px", marginBottom: "6px" }}>
+                <input type="text" value={h}
+                  onChange={e => {
+                    const updated = [...adForm.headlines];
+                    updated[idx] = e.target.value;
+                    setAdForm(f => ({ ...f, headlines: updated }));
+                  }}
+                  placeholder={`Nadpis ${idx + 1}`} style={{ ...inputStyle, flex: 1 }}
+                />
+                {adForm.headlines.length > 1 && (
+                  <button onClick={() => {
+                    setAdForm(f => ({ ...f, headlines: f.headlines.filter((_, i) => i !== idx) }));
+                  }} style={{
+                    background: "none", border: "none", color: "#ef4444",
+                    cursor: "pointer", fontSize: "1.1rem", padding: "0 4px",
+                  }}>✕</button>
+                )}
+              </div>
+            ))}
+            {adForm.headlines.length < 5 && (
+              <button onClick={() => setAdForm(f => ({ ...f, headlines: [...f.headlines, ""] }))}
+                style={{ ...btnSecondary, fontSize: ".78rem", padding: "4px 10px" }}>
+                + Přidat nadpis
+              </button>
+            )}
+          </div>
+
+          {/* === POPISKY (max 3) === */}
+          <div>
+            <label style={labelStyle}>
+              Popisky
+              <span style={{ fontWeight: 400, color: "var(--text-muted)", fontSize: ".75rem", marginLeft: "6px" }}>
+                ({adForm.descriptions.length}/3)
+              </span>
+            </label>
+            {adForm.descriptions.map((d, idx) => (
+              <div key={idx} style={{ display: "flex", gap: "6px", marginBottom: "6px" }}>
+                <input type="text" value={d}
+                  onChange={e => {
+                    const updated = [...adForm.descriptions];
+                    updated[idx] = e.target.value;
+                    setAdForm(f => ({ ...f, descriptions: updated }));
+                  }}
+                  placeholder={`Popisek ${idx + 1}`} style={{ ...inputStyle, flex: 1 }}
+                />
+                {adForm.descriptions.length > 1 && (
+                  <button onClick={() => {
+                    setAdForm(f => ({ ...f, descriptions: f.descriptions.filter((_, i) => i !== idx) }));
+                  }} style={{
+                    background: "none", border: "none", color: "#ef4444",
+                    cursor: "pointer", fontSize: "1.1rem", padding: "0 4px",
+                  }}>✕</button>
+                )}
+              </div>
+            ))}
+            {adForm.descriptions.length < 3 && (
+              <button onClick={() => setAdForm(f => ({ ...f, descriptions: [...f.descriptions, ""] }))}
+                style={{ ...btnSecondary, fontSize: ".78rem", padding: "4px 10px" }}>
+                + Přidat popisek
+              </button>
+            )}
           </div>
 
           <div style={{ display: "flex", gap: "8px" }}>

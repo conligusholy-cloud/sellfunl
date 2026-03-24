@@ -663,7 +663,7 @@ exports.fbListAds = onCall(
     const { accessToken } = await getFbToken(request.auth.uid);
 
     const ads = await fbApi(`${adSetId}/ads`, accessToken, {
-      fields: "id,name,status,creative{id,name,title,body,image_url,thumbnail_url}",
+      fields: "id,name,status,creative{id,name,title,body,image_url,thumbnail_url,object_story_spec,asset_feed_spec}",
       limit: "50",
     });
 
@@ -730,15 +730,64 @@ exports.fbCreateAdSet = onCall(
   }
 );
 
+// ─── FACEBOOK ADS: upload obrázku do ad accountu ───────────────────────────
+exports.fbUploadAdImage = onCall(
+  { secrets: [FB_APP_ID], timeoutSeconds: 60 },
+  async (request) => {
+    if (!request.auth) throw new HttpsError("unauthenticated", "Musíš být přihlášen.");
+    const { adAccountId, imageBase64, filename = "ad_image.png" } = request.data;
+    if (!adAccountId || !imageBase64) throw new HttpsError("invalid-argument", "Chybí adAccountId nebo imageBase64.");
+
+    const { accessToken } = await getFbToken(request.auth.uid);
+
+    // FB requires multipart/form-data for image uploads
+    const boundary = "----FormBoundary" + Date.now().toString(36);
+    const imageBuffer = Buffer.from(imageBase64, "base64");
+
+    const bodyParts = [
+      `--${boundary}\r\nContent-Disposition: form-data; name="access_token"\r\n\r\n${accessToken}`,
+      `--${boundary}\r\nContent-Disposition: form-data; name="filename"; filename="${filename}"\r\nContent-Type: image/png\r\n\r\n`,
+    ];
+
+    const bufferParts = [
+      Buffer.from(bodyParts[0] + "\r\n", "utf-8"),
+      Buffer.from(bodyParts[1], "utf-8"),
+      imageBuffer,
+      Buffer.from(`\r\n--${boundary}--\r\n`, "utf-8"),
+    ];
+    const fullBody = Buffer.concat(bufferParts);
+
+    const res = await fetch(`https://graph.facebook.com/v19.0/${adAccountId}/adimages`, {
+      method: "POST",
+      headers: { "Content-Type": `multipart/form-data; boundary=${boundary}` },
+      body: fullBody,
+    });
+    const data = await res.json();
+    if (data.error) {
+      throw new HttpsError("internal", `Facebook API: ${data.error.error_user_msg || data.error.message} (code: ${data.error.code})`);
+    }
+
+    // Response: { images: { "filename": { hash: "abc123", url: "..." } } }
+    const images = data.images || {};
+    const firstKey = Object.keys(images)[0];
+    if (!firstKey) throw new HttpsError("internal", "Upload obrázku selhal.");
+    return { hash: images[firstKey].hash, url: images[firstKey].url };
+  }
+);
+
 // ─── FACEBOOK ADS: vytvoř reklamu (ad creative + ad) ─────────────────────────
 exports.fbCreateAd = onCall(
-  { secrets: [FB_APP_ID], timeoutSeconds: 30 },
+  { secrets: [FB_APP_ID], timeoutSeconds: 60 },
   async (request) => {
     if (!request.auth) throw new HttpsError("unauthenticated", "Musíš být přihlášen.");
     const {
       adAccountId, adSetId, name,
-      pageId, linkUrl, message, headline, description, callToAction,
-      imageUrl,
+      pageId, linkUrl,
+      messages = [], headlines = [], descriptions = [],
+      callToAction = "LEARN_MORE",
+      imageHashes = [],
+      // Zpětná kompatibilita s jedním textem
+      message, headline, description, imageUrl,
     } = request.data;
 
     if (!adAccountId || !adSetId || !name || !pageId || !linkUrl) {
@@ -747,20 +796,59 @@ exports.fbCreateAd = onCall(
 
     const { accessToken } = await getFbToken(request.auth.uid);
 
-    const creativeBody = {
-      name: `Creative - ${name}`,
-      object_story_spec: {
-        page_id: pageId,
-        link_data: {
-          link: linkUrl,
-          message: message || "",
-          name: headline || "",
-          description: description || "",
-          call_to_action: callToAction ? { type: callToAction } : { type: "LEARN_MORE" },
+    // Sloučit nový formát (pole) se starým (jednotlivé řetězce)
+    const allMessages = [...(messages.filter(Boolean)), ...(message ? [message] : [])].filter(Boolean);
+    const allHeadlines = [...(headlines.filter(Boolean)), ...(headline ? [headline] : [])].filter(Boolean);
+    const allDescriptions = [...(descriptions.filter(Boolean)), ...(description ? [description] : [])].filter(Boolean);
+
+    // Pokud máme víc textů/obrázků → použij asset_feed_spec (Dynamic Creative)
+    const hasMultiple = allMessages.length > 1 || allHeadlines.length > 1 || allDescriptions.length > 1 || imageHashes.length > 1;
+
+    let creativeBody;
+
+    if (hasMultiple) {
+      // Dynamic Creative (Advantage+ creative) - asset_feed_spec
+      const assetFeedSpec = {
+        bodies: (allMessages.length > 0 ? allMessages : [""]).map(t => ({ text: t })),
+        titles: (allHeadlines.length > 0 ? allHeadlines : [""]).map(t => ({ text: t })),
+        descriptions: (allDescriptions.length > 0 ? allDescriptions : [""]).map(t => ({ text: t })),
+        call_to_action_types: [callToAction],
+        link_urls: [{ website_url: linkUrl }],
+        ad_formats: ["SINGLE_IMAGE"],
+      };
+      if (imageHashes.length > 0) {
+        assetFeedSpec.images = imageHashes.map(h => ({ hash: h }));
+      }
+      creativeBody = {
+        name: `Creative - ${name}`,
+        asset_feed_spec: assetFeedSpec,
+        degrees_of_freedom_spec: {
+          creative_features_spec: {
+            standard_enhancements: { enroll_status: "OPT_OUT" },
+          },
         },
-      },
-    };
-    if (imageUrl) creativeBody.object_story_spec.link_data.image_url = imageUrl;
+      };
+    } else {
+      // Klasický single creative
+      creativeBody = {
+        name: `Creative - ${name}`,
+        object_story_spec: {
+          page_id: pageId,
+          link_data: {
+            link: linkUrl,
+            message: allMessages[0] || "",
+            name: allHeadlines[0] || "",
+            description: allDescriptions[0] || "",
+            call_to_action: { type: callToAction },
+          },
+        },
+      };
+      if (imageHashes.length > 0) {
+        creativeBody.object_story_spec.link_data.image_hash = imageHashes[0];
+      } else if (imageUrl) {
+        creativeBody.object_story_spec.link_data.image_url = imageUrl;
+      }
+    }
 
     const creative = await fbApiPost(`${adAccountId}/adcreatives`, accessToken, creativeBody);
 
@@ -801,6 +889,46 @@ exports.fbUpdateStatus = onCall(
     if (data.error) throw new HttpsError("internal", `FB API: ${data.error.message}`);
 
     return { success: true };
+  }
+);
+
+// ─── FACEBOOK ADS: smaž objekt (kampaň / ad set / reklamu) ────────────────
+exports.fbDeleteObject = onCall(
+  { secrets: [FB_APP_ID], timeoutSeconds: 15 },
+  async (request) => {
+    if (!request.auth) throw new HttpsError("unauthenticated", "Musíš být přihlášen.");
+    const { objectId } = request.data;
+    if (!objectId) throw new HttpsError("invalid-argument", "Chybí objectId.");
+
+    const { accessToken } = await getFbToken(request.auth.uid);
+
+    const url = `https://graph.facebook.com/v19.0/${objectId}`;
+    const res = await fetch(url, {
+      method: "DELETE",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ access_token: accessToken }).toString(),
+    });
+    const data = await res.json();
+    if (data.error) throw new HttpsError("internal", `FB API: ${data.error.error_user_msg || data.error.message}`);
+    return { success: true };
+  }
+);
+
+// ─── FACEBOOK ADS: náhled reklamy (ad preview iframe) ─────────────────────
+exports.fbGetAdPreview = onCall(
+  { secrets: [FB_APP_ID], timeoutSeconds: 15 },
+  async (request) => {
+    if (!request.auth) throw new HttpsError("unauthenticated", "Musíš být přihlášen.");
+    const { adId, format = "DESKTOP_FEED_STANDARD" } = request.data;
+    if (!adId) throw new HttpsError("invalid-argument", "Chybí adId.");
+
+    const { accessToken } = await getFbToken(request.auth.uid);
+
+    const preview = await fbApi(`${adId}/previews`, accessToken, {
+      ad_format: format,
+    });
+
+    return { previews: preview.data || [] };
   }
 );
 

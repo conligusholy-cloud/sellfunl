@@ -142,7 +142,41 @@ export default function AdCopyGenerator() {
                 style={inputStyle}
               >
                 <option value="cs">Čeština</option>
+                <option value="sk">Slovenština</option>
                 <option value="en">Angličtina</option>
+                <option value="de">Němčina</option>
+                <option value="fr">Francouzština</option>
+                <option value="es">Španělština</option>
+                <option value="it">Italština</option>
+                <option value="pt">Portugalština</option>
+                <option value="nl">Holandština</option>
+                <option value="pl">Polština</option>
+                <option value="hu">Maďarština</option>
+                <option value="ro">Rumunština</option>
+                <option value="bg">Bulharština</option>
+                <option value="hr">Chorvatština</option>
+                <option value="sr">Srbština</option>
+                <option value="sl">Slovinština</option>
+                <option value="bs">Bosenština</option>
+                <option value="mk">Makedonština</option>
+                <option value="sq">Albánština</option>
+                <option value="el">Řečtina</option>
+                <option value="tr">Turečtina</option>
+                <option value="uk">Ukrajinština</option>
+                <option value="ru">Ruština</option>
+                <option value="be">Běloruština</option>
+                <option value="sv">Švédština</option>
+                <option value="no">Norština</option>
+                <option value="da">Dánština</option>
+                <option value="fi">Finština</option>
+                <option value="is">Islandština</option>
+                <option value="et">Estonština</option>
+                <option value="lv">Lotyšština</option>
+                <option value="lt">Litevština</option>
+                <option value="ga">Irština</option>
+                <option value="cy">Velština</option>
+                <option value="mt">Maltština</option>
+                <option value="ka">Gruzínština</option>
               </select>
             </div>
           </div>
