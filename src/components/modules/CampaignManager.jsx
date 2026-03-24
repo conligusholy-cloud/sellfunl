@@ -38,20 +38,59 @@ const CTA_OPTIONS = [
 ];
 
 export default function CampaignManager({ fbAccount }) {
-  const [adAccountId, setAdAccountId] = useState("");
+  const [adAccountId, setAdAccountId] = useState(() => {
+    try { return localStorage.getItem("sellfunl_default_ad_account") || ""; } catch { return ""; }
+  });
   const [campaigns, setCampaigns] = useState([]);
   const [loadingCampaigns, setLoadingCampaigns] = useState(false);
   const [expandedCampaign, setExpandedCampaign] = useState(null);
   const [showWizard, setShowWizard] = useState(false);
   const [error, setError] = useState(null);
+  const [isDefault, setIsDefault] = useState(() => {
+    try {
+      const saved = localStorage.getItem("sellfunl_default_ad_account") || "";
+      return saved !== "";
+    } catch { return false; }
+  });
 
-  // Nastav první ad account automaticky
+  // Nastav uložený nebo první ad account
   useEffect(() => {
     const accounts = fbAccount?.adAccounts || [];
-    if (accounts.length > 0 && !adAccountId) {
-      setAdAccountId(accounts[0].id);
+    if (accounts.length === 0) return;
+
+    // Přečti uloženou hodnotu přímo z localStorage (ne ze state, ten může být prázdný)
+    let saved = "";
+    try { saved = localStorage.getItem("sellfunl_default_ad_account") || ""; } catch {}
+
+    const exists = saved && accounts.some(a => a.id === saved);
+    if (exists) {
+      // Uložený účet stále existuje → nastav ho
+      setAdAccountId(saved);
+    } else {
+      // Neexistuje → nastav první a ulož
+      selectAdAccount(accounts[0].id);
     }
   }, [fbAccount?.adAccounts]);
+
+  function selectAdAccount(id) {
+    setAdAccountId(id);
+    // Pokud je aktuálně zaškrtnutý výchozí, ulož nový výběr taky
+    if (isDefault) {
+      try { localStorage.setItem("sellfunl_default_ad_account", id); } catch {}
+    }
+  }
+
+  function toggleDefault() {
+    if (isDefault) {
+      // Odznačit výchozí
+      try { localStorage.removeItem("sellfunl_default_ad_account"); } catch {}
+      setIsDefault(false);
+    } else {
+      // Zaškrtnout jako výchozí
+      try { localStorage.setItem("sellfunl_default_ad_account", adAccountId); } catch {}
+      setIsDefault(true);
+    }
+  }
 
   const loadCampaigns = useCallback(async () => {
     if (!adAccountId) return;
@@ -84,16 +123,36 @@ export default function CampaignManager({ fbAccount }) {
   return (
     <div>
       {/* Výběr reklamního účtu */}
-      {adAccounts.length > 1 && (
-        <div style={{ marginBottom: "20px" }}>
-          <label style={labelStyle}>Reklamní účet</label>
-          <select value={adAccountId} onChange={e => setAdAccountId(e.target.value)} style={inputStyle}>
+      <div style={{ marginBottom: "20px" }}>
+        <label style={labelStyle}>Reklamní účet</label>
+        <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+          <select value={adAccountId} onChange={e => selectAdAccount(e.target.value)} style={{ ...inputStyle, flex: 1 }}>
             {adAccounts.map(a => (
               <option key={a.id} value={a.id}>{a.name} ({a.id})</option>
             ))}
           </select>
         </div>
-      )}
+        <label
+          onClick={toggleDefault}
+          style={{
+            display: "inline-flex", alignItems: "center", gap: "8px",
+            marginTop: "8px", cursor: "pointer", fontSize: ".85rem",
+            color: isDefault ? "#7c3aed" : "var(--text-muted)",
+            userSelect: "none",
+          }}
+        >
+          <span style={{
+            display: "inline-flex", alignItems: "center", justifyContent: "center",
+            width: "20px", height: "20px", borderRadius: "4px",
+            border: isDefault ? "2px solid #7c3aed" : "2px solid #d1d5db",
+            background: isDefault ? "#7c3aed" : "transparent",
+            transition: "all .15s ease",
+          }}>
+            {isDefault && <span style={{ color: "#fff", fontSize: "14px", lineHeight: 1 }}>✓</span>}
+          </span>
+          {isDefault ? "Výchozí účet nastaven" : "Nastavit jako výchozí účet"}
+        </label>
+      </div>
 
       {/* Akční lišta */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "20px" }}>
@@ -101,11 +160,6 @@ export default function CampaignManager({ fbAccount }) {
           <h3 style={{ fontSize: "1rem", fontWeight: 600, color: "var(--text)", margin: 0 }}>
             Kampaně
           </h3>
-          {adAccounts.length === 1 && (
-            <span style={{ fontSize: ".78rem", color: "var(--text-muted)" }}>
-              ({adAccounts[0].name})
-            </span>
-          )}
         </div>
         <div style={{ display: "flex", gap: "8px" }}>
           <button onClick={loadCampaigns} disabled={loadingCampaigns} style={btnSecondary}>
