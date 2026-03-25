@@ -337,8 +337,6 @@ exports.facebookCreateConnectLink = onCall(
       "pages_show_list",
       "business_management",
       "pages_read_engagement",
-      "pages_manage_metadata",
-      "leads_retrieval",
     ].join(",");
 
     const url = `https://www.facebook.com/v19.0/dialog/oauth?client_id=${appId}&redirect_uri=${encodeURIComponent(redirectUri)}&state=${stateToken}&scope=${scopes}&response_type=code`;
