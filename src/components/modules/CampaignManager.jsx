@@ -1052,6 +1052,7 @@ function CampaignWizard({ adAccountId, onClose, onCreated }) {
         name: adSetForm.name,
         optimizationGoal: adSetForm.optimizationGoal,
         targeting,
+        isDynamicCreative: true,
       });
       setCreatedIds(ids => ({ ...ids, adSetId: data.adSetId }));
       setAdForm(f => ({ ...f, name: `${campForm.name} - Ad` }));

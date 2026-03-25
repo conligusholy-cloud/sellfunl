@@ -717,6 +717,7 @@ exports.fbCreateAdSet = onCall(
       adAccountId, campaignId, name,
       optimizationGoal, billingEvent = "IMPRESSIONS",
       targeting, startTime, endTime, status = "PAUSED",
+      isDynamicCreative = false,
     } = request.data;
 
     if (!adAccountId || !campaignId || !name || !targeting) {
@@ -732,6 +733,7 @@ exports.fbCreateAdSet = onCall(
       optimization_goal: optimizationGoal || "LINK_CLICKS",
       billing_event: billingEvent,
       targeting,
+      is_dynamic_creative: isDynamicCreative,
     };
     if (startTime) body.start_time = startTime;
     if (endTime) body.end_time = endTime;
