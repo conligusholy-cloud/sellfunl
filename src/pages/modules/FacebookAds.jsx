@@ -4,6 +4,7 @@ import { useFacebookAuth } from "../../hooks/useFacebookAuth";
 import AdCopyGenerator from "../../components/modules/AdCopyGenerator";
 import AdCreativeGenerator from "../../components/modules/AdCreativeGenerator";
 import CampaignManager from "../../components/modules/CampaignManager";
+import LeadFormManager from "../../components/modules/LeadFormManager";
 
 // ─── Sekce modulu ──────────────────────────────────────────────────────────
 const TABS = [
@@ -11,6 +12,7 @@ const TABS = [
   { id: "creatives", icon: "🎨", label: "Kreativy" },
   { id: "copy",      icon: "✍️", label: "Texty reklam" },
   { id: "campaigns", icon: "📊", label: "Kampaně" },
+  { id: "forms",     icon: "📋", label: "Formuláře" },
 ];
 
 export default function FacebookAds() {
@@ -74,6 +76,10 @@ export default function FacebookAds() {
 
       {activeTab === "campaigns" && fbAccount && (
         <CampaignManager fbAccount={fbAccount} />
+      )}
+
+      {activeTab === "forms" && fbAccount && (
+        <LeadFormManager fbAccount={fbAccount} />
       )}
     </div>
   );

@@ -1,8 +1,11 @@
 import { useState, useEffect, useCallback } from "react";
 import { httpsCallable, getFunctions } from "firebase/functions";
+import { getFirestore, collection, doc, getDocs, setDoc, deleteDoc, query, where, updateDoc } from "firebase/firestore";
+import { getAuth } from "firebase/auth";
 
 const functions = getFunctions();
 const call = (name) => httpsCallable(functions, name);
+const db = getFirestore();
 
 const OBJECTIVES = [
   { value: "OUTCOME_TRAFFIC",     label: "Návštěvnost webu",     icon: "🌐", desc: "Přiveď lidi na web" },
@@ -35,6 +38,9 @@ const CTA_OPTIONS = [
   { value: "CONTACT_US",   label: "Kontaktovat" },
   { value: "BOOK_TRAVEL",  label: "Rezervovat" },
   { value: "DOWNLOAD",     label: "Stáhnout" },
+  { value: "SUBSCRIBE",    label: "Odebírat" },
+  { value: "APPLY_NOW",    label: "Přihlásit se" },
+  { value: "GET_QUOTE",    label: "Získat cenovou nabídku" },
 ];
 
 export default function CampaignManager({ fbAccount }) {
@@ -46,6 +52,14 @@ export default function CampaignManager({ fbAccount }) {
   const [expandedCampaign, setExpandedCampaign] = useState(null);
   const [showWizard, setShowWizard] = useState(false);
   const [error, setError] = useState(null);
+
+  // Složky
+  const [folders, setFolders] = useState([]); // [{ id, name, campaignIds }]
+  const [activeFolder, setActiveFolder] = useState(null); // null = "Všechny"
+  const [showNewFolder, setShowNewFolder] = useState(false);
+  const [newFolderName, setNewFolderName] = useState("");
+  const [editingFolder, setEditingFolder] = useState(null);
+  const [movingCampaign, setMovingCampaign] = useState(null); // campaign ID being moved
   const [isDefault, setIsDefault] = useState(() => {
     try {
       const saved = localStorage.getItem("sellfunl_default_ad_account") || "";
@@ -91,6 +105,88 @@ export default function CampaignManager({ fbAccount }) {
       setIsDefault(true);
     }
   }
+
+  // ─── Složky: CRUD ───────────────────────────────────────────────────────
+  const uid = getAuth().currentUser?.uid;
+
+  const loadFolders = useCallback(async () => {
+    if (!uid || !adAccountId) return;
+    try {
+      const q = query(
+        collection(db, "campaignFolders"),
+        where("uid", "==", uid),
+        where("adAccountId", "==", adAccountId)
+      );
+      const snap = await getDocs(q);
+      setFolders(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    } catch (err) {
+      console.error("Load folders error:", err);
+    }
+  }, [uid, adAccountId]);
+
+  useEffect(() => { loadFolders(); }, [loadFolders]);
+
+  async function createFolder() {
+    if (!newFolderName.trim() || !uid) return;
+    const id = `${uid}_${adAccountId}_${Date.now()}`;
+    await setDoc(doc(db, "campaignFolders", id), {
+      uid,
+      adAccountId,
+      name: newFolderName.trim(),
+      campaignIds: [],
+      createdAt: new Date().toISOString(),
+    });
+    setNewFolderName("");
+    setShowNewFolder(false);
+    loadFolders();
+  }
+
+  async function renameFolder(folderId, newName) {
+    if (!newName.trim()) return;
+    await updateDoc(doc(db, "campaignFolders", folderId), { name: newName.trim() });
+    setEditingFolder(null);
+    loadFolders();
+  }
+
+  async function removeFolder(folderId) {
+    if (!window.confirm("Smazat složku? Kampaně zůstanou, jen se přesunou do 'Všechny'.")) return;
+    await deleteDoc(doc(db, "campaignFolders", folderId));
+    if (activeFolder === folderId) setActiveFolder(null);
+    loadFolders();
+  }
+
+  async function moveCampaignToFolder(campaignId, folderId) {
+    // Odeber ze všech složek
+    for (const f of folders) {
+      if (f.campaignIds?.includes(campaignId)) {
+        await updateDoc(doc(db, "campaignFolders", f.id), {
+          campaignIds: f.campaignIds.filter(id => id !== campaignId),
+        });
+      }
+    }
+    // Přidej do cílové složky (pokud není null = "Všechny")
+    if (folderId) {
+      const folder = folders.find(f => f.id === folderId);
+      if (folder) {
+        await updateDoc(doc(db, "campaignFolders", folderId), {
+          campaignIds: [...(folder.campaignIds || []), campaignId],
+        });
+      }
+    }
+    setMovingCampaign(null);
+    loadFolders();
+  }
+
+  // Filtrované kampaně podle aktivní složky
+  const filteredCampaigns = activeFolder
+    ? campaigns.filter(c => {
+        const folder = folders.find(f => f.id === activeFolder);
+        return folder?.campaignIds?.includes(c.id);
+      })
+    : campaigns;
+
+  // Kampaně bez složky
+  const unfoldered = campaigns.filter(c => !folders.some(f => f.campaignIds?.includes(c.id)));
 
   const loadCampaigns = useCallback(async () => {
     if (!adAccountId) return;
@@ -164,7 +260,7 @@ export default function CampaignManager({ fbAccount }) {
       </div>
 
       {/* Akční lišta */}
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "20px" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px" }}>
         <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
           <h3 style={{ fontSize: "1rem", fontWeight: 600, color: "var(--text)", margin: 0 }}>
             Kampaně
@@ -179,6 +275,138 @@ export default function CampaignManager({ fbAccount }) {
           </button>
         </div>
       </div>
+
+      {/* ═══ SLOŽKY ═══ */}
+      <div style={{ marginBottom: "16px" }}>
+        <div style={{ display: "flex", gap: "6px", flexWrap: "wrap", alignItems: "center" }}>
+          {/* Tab: Všechny */}
+          <button onClick={() => setActiveFolder(null)} style={{
+            padding: "6px 14px", borderRadius: "20px", fontSize: ".8rem", fontWeight: 500,
+            border: activeFolder === null ? "2px solid #7c3aed" : "1px solid var(--border)",
+            background: activeFolder === null ? "#f5f3ff" : "var(--bg-card)",
+            color: activeFolder === null ? "#7c3aed" : "var(--text)",
+            cursor: "pointer",
+          }}>
+            📁 Všechny ({campaigns.length})
+          </button>
+
+          {/* Tab: Bez složky */}
+          {folders.length > 0 && (
+            <button onClick={() => setActiveFolder("__unfoldered__")} style={{
+              padding: "6px 14px", borderRadius: "20px", fontSize: ".8rem", fontWeight: 500,
+              border: activeFolder === "__unfoldered__" ? "2px solid #7c3aed" : "1px solid var(--border)",
+              background: activeFolder === "__unfoldered__" ? "#f5f3ff" : "var(--bg-card)",
+              color: activeFolder === "__unfoldered__" ? "#7c3aed" : "var(--text-muted)",
+              cursor: "pointer",
+            }}>
+              Nezařazené ({unfoldered.length})
+            </button>
+          )}
+
+          {/* Složky */}
+          {folders.map(f => {
+            const count = campaigns.filter(c => f.campaignIds?.includes(c.id)).length;
+            const active = activeFolder === f.id;
+            return (
+              <div key={f.id} style={{ display: "inline-flex", alignItems: "center", gap: "0", position: "relative" }}>
+                {editingFolder === f.id ? (
+                  <input
+                    autoFocus
+                    defaultValue={f.name}
+                    onBlur={e => renameFolder(f.id, e.target.value)}
+                    onKeyDown={e => { if (e.key === "Enter") renameFolder(f.id, e.target.value); if (e.key === "Escape") setEditingFolder(null); }}
+                    style={{ ...inputStyle, padding: "4px 10px", fontSize: ".8rem", width: "120px", borderRadius: "20px" }}
+                  />
+                ) : (
+                  <button onClick={() => setActiveFolder(f.id)} style={{
+                    padding: "6px 14px", borderRadius: "20px 0 0 20px", fontSize: ".8rem", fontWeight: 500,
+                    border: active ? "2px solid #7c3aed" : "1px solid var(--border)",
+                    borderRight: "none",
+                    background: active ? "#f5f3ff" : "var(--bg-card)",
+                    color: active ? "#7c3aed" : "var(--text)",
+                    cursor: "pointer",
+                  }}>
+                    📂 {f.name} ({count})
+                  </button>
+                )}
+                {editingFolder !== f.id && (
+                  <div style={{ display: "inline-flex" }}>
+                    <button onClick={() => setEditingFolder(f.id)} title="Přejmenovat" style={{
+                      padding: "6px 6px", fontSize: ".7rem", cursor: "pointer",
+                      border: active ? "2px solid #7c3aed" : "1px solid var(--border)",
+                      borderLeft: "none", borderRight: "none",
+                      background: active ? "#f5f3ff" : "var(--bg-card)",
+                      color: "var(--text-muted)",
+                    }}>✏️</button>
+                    <button onClick={() => removeFolder(f.id)} title="Smazat složku" style={{
+                      padding: "6px 8px", borderRadius: "0 20px 20px 0", fontSize: ".7rem", cursor: "pointer",
+                      border: active ? "2px solid #7c3aed" : "1px solid var(--border)",
+                      borderLeft: "none",
+                      background: active ? "#f5f3ff" : "var(--bg-card)",
+                      color: "#ef4444",
+                    }}>✕</button>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+
+          {/* Nová složka */}
+          {showNewFolder ? (
+            <div style={{ display: "inline-flex", gap: "4px", alignItems: "center" }}>
+              <input
+                autoFocus
+                value={newFolderName}
+                onChange={e => setNewFolderName(e.target.value)}
+                onKeyDown={e => { if (e.key === "Enter") createFolder(); if (e.key === "Escape") setShowNewFolder(false); }}
+                placeholder="Název složky"
+                style={{ ...inputStyle, padding: "4px 10px", fontSize: ".8rem", width: "130px", borderRadius: "20px" }}
+              />
+              <button onClick={createFolder} style={{
+                padding: "4px 10px", borderRadius: "20px", fontSize: ".78rem",
+                border: "1px solid #16a34a", background: "#dcfce7", color: "#16a34a",
+                cursor: "pointer", fontWeight: 600,
+              }}>✓</button>
+              <button onClick={() => { setShowNewFolder(false); setNewFolderName(""); }} style={{
+                padding: "4px 8px", borderRadius: "20px", fontSize: ".78rem",
+                border: "1px solid var(--border)", background: "var(--bg-card)", color: "var(--text-muted)",
+                cursor: "pointer",
+              }}>✕</button>
+            </div>
+          ) : (
+            <button onClick={() => setShowNewFolder(true)} style={{
+              padding: "6px 12px", borderRadius: "20px", fontSize: ".78rem",
+              border: "1px dashed var(--border)", background: "transparent",
+              color: "var(--text-muted)", cursor: "pointer",
+            }}>
+              + Složka
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Move to folder modal */}
+      {movingCampaign && (
+        <div style={{
+          padding: "12px 16px", borderRadius: "8px", marginBottom: "12px",
+          background: "#f5f3ff", border: "1px solid #c4b5fd", fontSize: ".85rem",
+        }}>
+          <span style={{ fontWeight: 600, color: "#7c3aed" }}>Přesunout kampaň do složky:</span>
+          <div style={{ display: "flex", gap: "6px", marginTop: "8px", flexWrap: "wrap" }}>
+            <button onClick={() => moveCampaignToFolder(movingCampaign, null)} style={{
+              ...btnSmall, color: "var(--text)", borderColor: "var(--border)",
+            }}>Nezařazené</button>
+            {folders.map(f => (
+              <button key={f.id} onClick={() => moveCampaignToFolder(movingCampaign, f.id)} style={{
+                ...btnSmall, color: "#7c3aed", borderColor: "#7c3aed",
+              }}>📂 {f.name}</button>
+            ))}
+            <button onClick={() => setMovingCampaign(null)} style={{
+              ...btnSmall, color: "#ef4444", borderColor: "#ef4444", marginLeft: "auto",
+            }}>✕ Zrušit</button>
+          </div>
+        </div>
+      )}
 
       {error && (
         <div style={{
@@ -205,18 +433,31 @@ export default function CampaignManager({ fbAccount }) {
         </div>
       ) : campaigns.length === 0 ? (
         <EmptyState onNew={() => setShowWizard(true)} />
-      ) : (
-        <div style={{ display: "grid", gap: "12px" }}>
-          {campaigns.map(c => (
-            <CampaignRow key={c.id} campaign={c}
-              expanded={expandedCampaign === c.id}
-              onToggle={() => setExpandedCampaign(expandedCampaign === c.id ? null : c.id)}
-              onStatusChange={updateStatus}
-              onDelete={deleteObject}
-            />
-          ))}
-        </div>
-      )}
+      ) : (() => {
+        const displayed = activeFolder === "__unfoldered__"
+          ? unfoldered
+          : activeFolder
+          ? campaigns.filter(c => folders.find(f => f.id === activeFolder)?.campaignIds?.includes(c.id))
+          : campaigns;
+
+        return displayed.length === 0 ? (
+          <div style={{ padding: "30px", textAlign: "center", color: "var(--text-muted)", fontSize: ".88rem" }}>
+            {activeFolder === "__unfoldered__" ? "Všechny kampaně jsou zařazeny ve složkách." : "V této složce nejsou žádné kampaně."}
+          </div>
+        ) : (
+          <div style={{ display: "grid", gap: "12px" }}>
+            {displayed.map(c => (
+              <CampaignRow key={c.id} campaign={c}
+                expanded={expandedCampaign === c.id}
+                onToggle={() => setExpandedCampaign(expandedCampaign === c.id ? null : c.id)}
+                onStatusChange={updateStatus}
+                onDelete={deleteObject}
+                onMove={folders.length > 0 ? () => setMovingCampaign(c.id) : null}
+              />
+            ))}
+          </div>
+        );
+      })()}
     </div>
   );
 }
@@ -243,7 +484,7 @@ function EmptyState({ onNew }) {
 }
 
 // ─── Řádek kampaně ───────────────────────────────────────────────────────────
-function CampaignRow({ campaign, expanded, onToggle, onStatusChange, onDelete }) {
+function CampaignRow({ campaign, expanded, onToggle, onStatusChange, onDelete, onMove }) {
   const st = STATUS_MAP[campaign.status] || STATUS_MAP.PAUSED;
   const obj = OBJECTIVES.find(o => o.value === campaign.objective);
   const budget = campaign.daily_budget
@@ -288,14 +529,14 @@ function CampaignRow({ campaign, expanded, onToggle, onStatusChange, onDelete })
 
       {/* Detail */}
       {expanded && (
-        <CampaignDetail campaign={campaign} onStatusChange={onStatusChange} onDelete={onDelete} />
+        <CampaignDetail campaign={campaign} onStatusChange={onStatusChange} onDelete={onDelete} onMove={onMove} />
       )}
     </div>
   );
 }
 
 // ─── Detail kampaně (ad sety, reklamy) ───────────────────────────────────────
-function CampaignDetail({ campaign, onStatusChange, onDelete }) {
+function CampaignDetail({ campaign, onStatusChange, onDelete, onMove }) {
   const [adSets, setAdSets] = useState([]);
   const [loading, setLoading] = useState(true);
   const [expandedAdSet, setExpandedAdSet] = useState(null);
@@ -338,6 +579,11 @@ function CampaignDetail({ campaign, onStatusChange, onDelete }) {
         }} style={{ ...btnSmall, color: "#6b7280", borderColor: "#6b7280" }}>
           📦 Archivovat
         </button>
+        {onMove && (
+          <button onClick={onMove} style={{ ...btnSmall, color: "#7c3aed", borderColor: "#7c3aed" }}>
+            📂 Do složky
+          </button>
+        )}
         <button onClick={() => {
           if (window.confirm(`Opravdu smazat kampaň "${campaign.name}"? Smaže se i vše pod ní (ad sety, reklamy). Tuto akci nelze vrátit!`)) {
             onDelete(campaign.id);
@@ -667,7 +913,11 @@ function CampaignWizard({ adAccountId, onClose, onCreated }) {
     messages: [""],        // max 3
     headlines: [""],       // max 5
     descriptions: [""],    // max 3
+    adMode: "url",         // "url" | "form"
+    leadFormId: "",
   });
+  const [leadForms, setLeadForms] = useState([]);
+  const [loadingForms, setLoadingForms] = useState(false);
   const [mediaSlots, setMediaSlots] = useState([
     { label: "Čtverec (1:1)", ratio: "1:1", file: null, preview: null, hash: null, uploading: false },
     { label: "Story (9:16)", ratio: "9:16", file: null, preview: null, hash: null, uploading: false },
@@ -689,6 +939,21 @@ function CampaignWizard({ adAccountId, onClose, onCreated }) {
     }
     load();
   }, []);
+
+  // Načti lead gen formuláře pro vybranou stránku
+  async function loadLeadForms(pageId) {
+    if (!pageId) return;
+    setLoadingForms(true);
+    try {
+      const { data } = await call("fbListLeadForms")({ pageId });
+      setLeadForms(data.forms || []);
+    } catch (err) {
+      console.error("Load lead forms error:", err);
+      setLeadForms([]);
+    } finally {
+      setLoadingForms(false);
+    }
+  }
 
   async function createCampaign() {
     if (!campForm.name || !campForm.objective) return alert("Vyplň název a cíl kampaně.");
@@ -840,7 +1105,9 @@ function CampaignWizard({ adAccountId, onClose, onCreated }) {
   }
 
   async function createAd() {
-    if (!adForm.name || !adForm.pageId || !adForm.linkUrl) return alert("Vyplň název, FB stránku a odkaz.");
+    if (!adForm.name || !adForm.pageId) return alert("Vyplň název a FB stránku.");
+    if (adForm.adMode === "url" && !adForm.linkUrl) return alert("Vyplň odkaz (URL).");
+    if (adForm.adMode === "form" && !adForm.leadFormId) return alert("Vyber lead gen formulář.");
 
     // Upload media that hasn't been uploaded yet
     const pendingUploads = mediaSlots
@@ -863,18 +1130,24 @@ function CampaignWizard({ adAccountId, onClose, onCreated }) {
     try {
       const imageHashes = mediaSlots.filter(s => s.hash).map(s => s.hash);
 
-      await call("fbCreateAd")({
+      const adPayload = {
         adAccountId,
         adSetId: createdIds.adSetId,
         name: adForm.name,
         pageId: adForm.pageId,
-        linkUrl: adForm.linkUrl,
         messages: adForm.messages.filter(Boolean),
         headlines: adForm.headlines.filter(Boolean),
         descriptions: adForm.descriptions.filter(Boolean),
         callToAction: adForm.cta,
         imageHashes,
-      });
+      };
+      if (adForm.adMode === "form" && adForm.leadFormId) {
+        adPayload.leadFormId = adForm.leadFormId;
+        adPayload.linkUrl = adForm.linkUrl || "";
+      } else {
+        adPayload.linkUrl = adForm.linkUrl;
+      }
+      await call("fbCreateAd")(adPayload);
       setStep(4);
     } catch (err) {
       alert(`Chyba: ${err.message}`);
@@ -1315,12 +1588,82 @@ function CampaignWizard({ adAccountId, onClose, onCreated }) {
               </select>
             </div>
           </div>
+          {/* Přepínač URL / Formulář */}
           <div>
-            <label style={labelStyle}>Odkaz (URL) *</label>
-            <input type="url" value={adForm.linkUrl}
-              onChange={e => setAdForm(f => ({ ...f, linkUrl: e.target.value }))}
-              placeholder="https://tvuj-web.cz" style={inputStyle}
-            />
+            <label style={labelStyle}>Cíl reklamy</label>
+            <div style={{ display: "flex", gap: "4px", marginBottom: "10px" }}>
+              {[
+                { value: "url", label: "🌐 Odkaz (URL)", desc: "Pošli lidi na web" },
+                { value: "form", label: "📋 Formulář", desc: "Sbírej kontakty" },
+              ].map(mode => (
+                <button key={mode.value}
+                  onClick={() => {
+                    setAdForm(f => ({ ...f, adMode: mode.value }));
+                    if (mode.value === "form" && leadForms.length === 0 && adForm.pageId) {
+                      loadLeadForms(adForm.pageId);
+                    }
+                  }}
+                  style={{
+                    flex: 1, padding: "10px", borderRadius: "8px", cursor: "pointer",
+                    border: adForm.adMode === mode.value ? "2px solid #7c3aed" : "1px solid var(--border)",
+                    background: adForm.adMode === mode.value ? "#f5f3ff" : "var(--bg-card)",
+                    textAlign: "center",
+                  }}
+                >
+                  <div style={{ fontSize: ".88rem", fontWeight: 600, color: adForm.adMode === mode.value ? "#7c3aed" : "var(--text)" }}>
+                    {mode.label}
+                  </div>
+                  <div style={{ fontSize: ".72rem", color: "var(--text-muted)", marginTop: "2px" }}>
+                    {mode.desc}
+                  </div>
+                </button>
+              ))}
+            </div>
+
+            {adForm.adMode === "url" && (
+              <div>
+                <label style={labelStyle}>Odkaz (URL) *</label>
+                <input type="url" value={adForm.linkUrl}
+                  onChange={e => setAdForm(f => ({ ...f, linkUrl: e.target.value }))}
+                  placeholder="https://tvuj-web.cz" style={inputStyle}
+                />
+              </div>
+            )}
+
+            {adForm.adMode === "form" && (
+              <div>
+                <label style={labelStyle}>Lead gen formulář *</label>
+                {loadingForms ? (
+                  <p style={{ fontSize: ".82rem", color: "var(--text-muted)" }}>Načítám formuláře...</p>
+                ) : leadForms.length > 0 ? (
+                  <select value={adForm.leadFormId}
+                    onChange={e => setAdForm(f => ({ ...f, leadFormId: e.target.value }))}
+                    style={inputStyle}
+                  >
+                    <option value="">— Vyber formulář —</option>
+                    {leadForms.map(f => (
+                      <option key={f.id} value={f.id}>
+                        {f.name} {f.leads_count != null ? `(${f.leads_count} leadů)` : ""}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <div style={{
+                    padding: "12px", borderRadius: "8px", background: "#fef3c7",
+                    border: "1px solid #fde68a", fontSize: ".82rem", color: "#92400e",
+                  }}>
+                    Nemáš žádné formuláře. Vytvoř je v záložce <strong>Formuláře</strong>.
+                  </div>
+                )}
+                <div style={{ marginTop: "10px" }}>
+                  <label style={labelStyle}>Odkaz po vyplnění (volitelné)</label>
+                  <input type="url" value={adForm.linkUrl}
+                    onChange={e => setAdForm(f => ({ ...f, linkUrl: e.target.value }))}
+                    placeholder="https://tvuj-web.cz (po odeslání formuláře)" style={inputStyle}
+                  />
+                </div>
+              </div>
+            )}
           </div>
 
           {/* === MÉDIA (3 formáty) === */}
@@ -1497,7 +1840,7 @@ function CampaignWizard({ adAccountId, onClose, onCreated }) {
 
           <div style={{ display: "flex", gap: "8px" }}>
             <button onClick={() => setStep(2)} style={btnSecondary}>← Zpět</button>
-            <button onClick={createAd} disabled={saving || !adForm.pageId} style={btnPrimary}>
+            <button onClick={createAd} disabled={saving || !adForm.pageId || (adForm.adMode === "url" && !adForm.linkUrl) || (adForm.adMode === "form" && !adForm.leadFormId)} style={btnPrimary}>
               {saving ? "⏳ Vytvářím..." : "Vytvořit reklamu →"}
             </button>
             <button onClick={() => setStep(4)} style={{ ...btnSecondary, marginLeft: "auto", fontSize: ".78rem" }}>

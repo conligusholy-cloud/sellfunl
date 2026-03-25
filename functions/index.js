@@ -797,12 +797,14 @@ exports.fbCreateAd = onCall(
       messages = [], headlines = [], descriptions = [],
       callToAction = "LEARN_MORE",
       imageHashes = [],
+      // Lead gen formulář (alternativa k URL)
+      leadFormId,
       // Zpětná kompatibilita s jedním textem
       message, headline, description, imageUrl,
     } = request.data;
 
-    if (!adAccountId || !adSetId || !name || !pageId || !linkUrl) {
-      throw new HttpsError("invalid-argument", "Chybí povinné parametry.");
+    if (!adAccountId || !adSetId || !name || !pageId || (!linkUrl && !leadFormId)) {
+      throw new HttpsError("invalid-argument", "Chybí povinné parametry (potřeba linkUrl nebo leadFormId).");
     }
 
     const { accessToken } = await getFbToken(request.auth.uid);
@@ -817,7 +819,41 @@ exports.fbCreateAd = onCall(
 
     let creativeBody;
 
-    if (hasMultiple) {
+    if (leadFormId) {
+      // Lead Gen formulář — vždy single creative s lead_gen_form_id
+      const pageTokenData = await fbApi(`${pageId}`, accessToken, { fields: "access_token" });
+      const pToken = pageTokenData.access_token || accessToken;
+
+      creativeBody = {
+        name: `Creative - ${name}`,
+        object_story_spec: {
+          page_id: pageId,
+          link_data: {
+            link: linkUrl || `https://fb.me/`,
+            message: allMessages[0] || "",
+            name: allHeadlines[0] || "",
+            description: allDescriptions[0] || "",
+            call_to_action: {
+              type: callToAction || "SIGN_UP",
+              value: { lead_gen_form_id: leadFormId },
+            },
+          },
+        },
+      };
+      if (imageHashes.length > 0) {
+        creativeBody.object_story_spec.link_data.image_hash = imageHashes[0];
+      }
+      // Lead gen creative musí být vytvořen s page access tokenem
+      const creative = await fbApiPost(`${adAccountId}/adcreatives`, pToken, creativeBody);
+      const adBody = {
+        name,
+        adset_id: adSetId,
+        creative: { creative_id: creative.id },
+        status: "PAUSED",
+      };
+      const ad = await fbApiPost(`${adAccountId}/ads`, accessToken, adBody);
+      return { adId: ad.id, creativeId: creative.id };
+    } else if (hasMultiple) {
       // Dynamic Creative (Advantage+ creative) - asset_feed_spec
       const assetFeedSpec = {
         bodies: (allMessages.length > 0 ? allMessages : [""]).map(t => ({ text: t })),
@@ -957,5 +993,86 @@ exports.fbListPages = onCall(
     });
 
     return { pages: pages.data || [] };
+  }
+);
+
+// ─── FACEBOOK ADS: načti lead gen formuláře stránky ──────────────────────
+exports.fbListLeadForms = onCall(
+  { secrets: [FB_APP_ID], timeoutSeconds: 30 },
+  async (request) => {
+    if (!request.auth) throw new HttpsError("unauthenticated", "Musíš být přihlášen.");
+    const { pageId } = request.data;
+    if (!pageId) throw new HttpsError("invalid-argument", "Chybí pageId.");
+
+    const { accessToken } = await getFbToken(request.auth.uid);
+
+    // Need page access token for lead gen forms
+    const pageToken = await fbApi(`${pageId}`, accessToken, { fields: "access_token" });
+    const pToken = pageToken.access_token || accessToken;
+
+    const forms = await fbApi(`${pageId}/leadgen_forms`, pToken, {
+      fields: "id,name,status,leads_count,created_time,questions,privacy_policy,thank_you_page",
+      limit: "50",
+    });
+
+    return { forms: forms.data || [] };
+  }
+);
+
+// ─── FACEBOOK ADS: vytvoř lead gen formulář ──────────────────────────────
+exports.fbCreateLeadForm = onCall(
+  { secrets: [FB_APP_ID], timeoutSeconds: 30 },
+  async (request) => {
+    if (!request.auth) throw new HttpsError("unauthenticated", "Musíš být přihlášen.");
+    const { pageId, name, questions, privacyPolicyUrl, thankYouTitle, thankYouBody, thankYouButtonText, thankYouUrl } = request.data;
+    if (!pageId || !name || !questions || !privacyPolicyUrl) {
+      throw new HttpsError("invalid-argument", "Chybí povinné parametry (pageId, name, questions, privacyPolicyUrl).");
+    }
+
+    const { accessToken } = await getFbToken(request.auth.uid);
+
+    // Need page access token
+    const pageToken = await fbApi(`${pageId}`, accessToken, { fields: "access_token" });
+    const pToken = pageToken.access_token || accessToken;
+
+    const body = {
+      name,
+      questions,
+      privacy_policy: { url: privacyPolicyUrl },
+      follow_up_action_url: thankYouUrl || privacyPolicyUrl,
+    };
+
+    if (thankYouTitle || thankYouBody) {
+      body.thank_you_page = {};
+      if (thankYouTitle) body.thank_you_page.title = thankYouTitle;
+      if (thankYouBody) body.thank_you_page.body = thankYouBody;
+      if (thankYouButtonText) body.thank_you_page.button_text = thankYouButtonText;
+      if (thankYouUrl) body.thank_you_page.button_type = "VIEW_WEBSITE";
+    }
+
+    const result = await fbApiPost(`${pageId}/leadgen_forms`, pToken, body);
+    return { formId: result.id };
+  }
+);
+
+// ─── FACEBOOK ADS: smaž lead gen formulář ────────────────────────────────
+exports.fbDeleteLeadForm = onCall(
+  { secrets: [FB_APP_ID], timeoutSeconds: 15 },
+  async (request) => {
+    if (!request.auth) throw new HttpsError("unauthenticated", "Musíš být přihlášen.");
+    const { formId } = request.data;
+    if (!formId) throw new HttpsError("invalid-argument", "Chybí formId.");
+
+    const { accessToken } = await getFbToken(request.auth.uid);
+
+    const url = `https://graph.facebook.com/v19.0/${formId}`;
+    const res = await fetch(url, {
+      method: "DELETE",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ access_token: accessToken }).toString(),
+    });
+    const data = await res.json();
+    if (data.error) throw new HttpsError("internal", `FB API: ${data.error.error_user_msg || data.error.message}`);
+    return { success: true };
   }
 );

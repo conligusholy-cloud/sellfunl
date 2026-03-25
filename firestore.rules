@@ -4,7 +4,6 @@ service cloud.firestore {
   match /databases/{database}/documents {
 
     // ─── USERS ──────────────────────────────────────────────────────────────
-    // Uživatel může číst a upravovat pouze svůj vlastní dokument
     match /users/{userId} {
       allow read, update: if request.auth != null && request.auth.uid == userId;
       allow create: if request.auth != null && request.auth.uid == userId;
@@ -12,27 +11,35 @@ service cloud.firestore {
     }
 
     // ─── PAGES ──────────────────────────────────────────────────────────────
-    // Vlastník může CRUD své stránky, publikované stránky jsou veřejně čitelné
     match /pages/{pageId} {
       allow read: if resource.data.published == true
-                  || (request.auth != null && resource.data.userId == request.auth.uid);
+                  || (request.auth != null && resource.data.uid == request.auth.uid);
       allow create: if request.auth != null
-                    && request.resource.data.userId == request.auth.uid;
+                    && request.resource.data.uid == request.auth.uid;
       allow update, delete: if request.auth != null
-                            && resource.data.userId == request.auth.uid;
+                            && resource.data.uid == request.auth.uid;
+    }
+
+    // ─── FOLDERS ────────────────────────────────────────────────────────────
+    match /folders/{folderId} {
+      allow read: if request.auth != null && resource.data.uid == request.auth.uid;
+      allow create: if request.auth != null
+                    && request.resource.data.uid == request.auth.uid;
+      allow update, delete: if request.auth != null
+                            && resource.data.uid == request.auth.uid;
     }
 
     // ─── DOMAINS ────────────────────────────────────────────────────────────
-    // Pouze vlastník může spravovat své domény
     match /domains/{domainId} {
-      allow read, write: if request.auth != null
-                         && resource.data.userId == request.auth.uid;
+      allow read: if request.auth != null
+                  && resource.data.uid == request.auth.uid;
       allow create: if request.auth != null
-                    && request.resource.data.userId == request.auth.uid;
+                    && request.resource.data.uid == request.auth.uid;
+      allow update, delete: if request.auth != null
+                            && resource.data.uid == request.auth.uid;
     }
 
     // ─── VISITS (analytika) ─────────────────────────────────────────────────
-    // Kdokoli může vytvořit návštěvu (veřejné stránky), číst může jen vlastník stránky
     match /visits/{visitId} {
       allow create: if true;
       allow read: if request.auth != null;
@@ -40,29 +47,34 @@ service cloud.firestore {
     }
 
     // ─── CONVERSIONS (formuláře/leady) ──────────────────────────────────────
-    // Kdokoli může vytvořit konverzi, číst může jen přihlášený uživatel
     match /conversions/{conversionId} {
       allow create: if true;
       allow read: if request.auth != null;
       allow update, delete: if false;
     }
 
+    // ─── CAMPAIGN FOLDERS ──────────────────────────────────────────────────
+    match /campaignFolders/{folderId} {
+      allow read: if request.auth != null && resource.data.uid == request.auth.uid;
+      allow create: if request.auth != null
+                    && request.resource.data.uid == request.auth.uid;
+      allow update, delete: if request.auth != null
+                            && resource.data.uid == request.auth.uid;
+    }
+
     // ─── FACEBOOK ACCOUNTS ────────────────────────────────────────────────
-    // Uživatel čte svůj FB účet, zápis jen přes Cloud Functions (token!)
     match /facebookAccounts/{userId} {
       allow read: if request.auth != null && request.auth.uid == userId;
       allow delete: if request.auth != null && request.auth.uid == userId;
-      allow create, update: if false; // Pouze Cloud Functions (admin SDK)
+      allow create, update: if false;
     }
 
     // ─── FB OAuth STATE (dočasné) ──────────────────────────────────────────
-    // Pouze Cloud Functions vytváří a mažou state tokeny
     match /fbOAuthState/{stateId} {
       allow read, write: if false;
     }
 
     // ─── SETTINGS ───────────────────────────────────────────────────────────
-    // Nastavení jsou read-only pro přihlášené uživatele
     match /settings/{settingId} {
       allow read: if request.auth != null;
       allow write: if false;
