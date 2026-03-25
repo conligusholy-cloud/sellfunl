@@ -81,14 +81,34 @@ exports.createConnectOnboarding = onCall(
     }
 
     const isDev = process.env.FUNCTIONS_EMULATOR === "true";
-    const baseUrl = isDev ? "http://localhost:5173" : "https://sellfunl.cz";
-    const accountLink = await stripe.accountLinks.create({
-      account: stripeAccountId,
-      refresh_url: `${baseUrl}/dashboard`,
-      return_url:  `${baseUrl}/dashboard`,
-      type: "account_onboarding",
-    });
-    return { url: accountLink.url };
+    const baseUrl = isDev ? "http://localhost:5173" : "https://sellfunl.com";
+    try {
+      const accountLink = await stripe.accountLinks.create({
+        account: stripeAccountId,
+        refresh_url: `${baseUrl}/dashboard`,
+        return_url:  `${baseUrl}/dashboard`,
+        type: "account_onboarding",
+      });
+      return { url: accountLink.url };
+    } catch (stripeErr) {
+      // Stripe účet může být v neplatném stavu — vytvoř nový
+      console.error("Stripe accountLink error:", stripeErr.message);
+      if (stripeErr.code === "account_invalid" || stripeErr.type === "StripeInvalidRequestError") {
+        const newAccount = await stripe.accounts.create({
+          type: "express", country: "CZ",
+          capabilities: { card_payments: { requested: true }, transfers: { requested: true } },
+        });
+        await userRef.set({ stripeAccountId: newAccount.id }, { merge: true });
+        const accountLink = await stripe.accountLinks.create({
+          account: newAccount.id,
+          refresh_url: `${baseUrl}/dashboard`,
+          return_url:  `${baseUrl}/dashboard`,
+          type: "account_onboarding",
+        });
+        return { url: accountLink.url };
+      }
+      throw new HttpsError("internal", `Stripe chyba: ${stripeErr.message}`);
+    }
   }
 );
 
