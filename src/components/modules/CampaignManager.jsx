@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { httpsCallable, getFunctions } from "firebase/functions";
-import { getFirestore, collection, doc, getDocs, setDoc, deleteDoc, query, where, updateDoc } from "firebase/firestore";
+import { getFirestore, collection, doc, getDoc, getDocs, setDoc, deleteDoc, query, where, updateDoc } from "firebase/firestore";
 import { getAuth } from "firebase/auth";
 
 const functions = getFunctions();
@@ -946,7 +946,26 @@ function CampaignWizard({ adAccountId, onClose, onCreated }) {
     setLoadingForms(true);
     try {
       const { data } = await call("fbListLeadForms")({ pageId });
-      setLeadForms(data.forms || []);
+      const loadedForms = data.forms || [];
+      setLeadForms(loadedForms);
+
+      // Předvyplň výchozí formulář pokud existuje
+      const user = getAuth().currentUser;
+      if (user && loadedForms.length > 0) {
+        try {
+          const defRef = doc(db, "fbDefaultLeadForms", `${user.uid}_${pageId}`);
+          const defSnap = await getDoc(defRef);
+          if (defSnap.exists()) {
+            const defFormId = defSnap.data().formId;
+            // Ověř, že formulář stále existuje v seznamu
+            if (loadedForms.some(f => f.id === defFormId)) {
+              setAdForm(f => ({ ...f, leadFormId: defFormId }));
+            }
+          }
+        } catch (err) {
+          console.error("Load default lead form error:", err);
+        }
+      }
     } catch (err) {
       console.error("Load lead forms error:", err);
       setLeadForms([]);

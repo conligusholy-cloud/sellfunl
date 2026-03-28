@@ -1,5 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { httpsCallable, getFunctions } from "firebase/functions";
+import { doc, getDoc, setDoc } from "firebase/firestore";
+import { db, auth } from "../../firebase/config";
 
 const functions = getFunctions();
 const call = (name) => httpsCallable(functions, name);
@@ -24,6 +26,8 @@ export default function LeadFormManager({ fbAccount }) {
   const [showCreate, setShowCreate] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
+  const [defaultFormId, setDefaultFormId] = useState(null);
+  const [savingDefault, setSavingDefault] = useState(false);
 
   // Nový formulář
   const [formData, setFormData] = useState({
@@ -69,6 +73,46 @@ export default function LeadFormManager({ fbAccount }) {
   }, [selectedPage]);
 
   useEffect(() => { loadForms(); }, [loadForms]);
+
+  // Načti výchozí formulář pro vybranou stránku
+  useEffect(() => {
+    async function loadDefault() {
+      if (!selectedPage || !auth.currentUser) return;
+      try {
+        const ref = doc(db, "fbDefaultLeadForms", `${auth.currentUser.uid}_${selectedPage}`);
+        const snap = await getDoc(ref);
+        if (snap.exists()) {
+          setDefaultFormId(snap.data().formId);
+        } else {
+          setDefaultFormId(null);
+        }
+      } catch (err) {
+        console.error("Load default form error:", err);
+      }
+    }
+    loadDefault();
+  }, [selectedPage]);
+
+  // Nastav výchozí formulář
+  async function setDefaultForm(formId) {
+    if (!selectedPage || !auth.currentUser) return;
+    setSavingDefault(true);
+    try {
+      const ref = doc(db, "fbDefaultLeadForms", `${auth.currentUser.uid}_${selectedPage}`);
+      await setDoc(ref, {
+        formId,
+        pageId: selectedPage,
+        userId: auth.currentUser.uid,
+        updatedAt: new Date().toISOString(),
+      });
+      setDefaultFormId(formId);
+    } catch (err) {
+      console.error("Set default form error:", err);
+      alert("Nepodařilo se nastavit výchozí formulář.");
+    } finally {
+      setSavingDefault(false);
+    }
+  }
 
   function addQuestion() {
     if (formData.questions.length >= 10) return;
@@ -307,11 +351,35 @@ export default function LeadFormManager({ fbAccount }) {
               background: "var(--bg-card)", border: "1px solid var(--border)",
             }}>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                <div
+                  onClick={() => !savingDefault && setDefaultForm(form.id)}
+                  style={{
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    width: "22px", height: "22px", minWidth: "22px",
+                    borderRadius: "50%", cursor: savingDefault ? "wait" : "pointer",
+                    border: defaultFormId === form.id ? "2px solid #7c3aed" : "2px solid var(--border)",
+                    background: defaultFormId === form.id ? "#7c3aed" : "transparent",
+                    marginRight: "12px", transition: "all 0.2s",
+                  }}
+                  title={defaultFormId === form.id ? "Výchozí formulář" : "Nastavit jako výchozí"}
+                >
+                  {defaultFormId === form.id && (
+                    <div style={{ width: "8px", height: "8px", borderRadius: "50%", background: "#fff" }} />
+                  )}
+                </div>
                 <div style={{ flex: 1 }}>
                   <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "4px" }}>
                     <span style={{ fontWeight: 600, fontSize: ".92rem", color: "var(--text)" }}>
                       {form.name}
                     </span>
+                    {defaultFormId === form.id && (
+                      <span style={{
+                        padding: "2px 8px", borderRadius: "12px", fontSize: ".7rem", fontWeight: 600,
+                        background: "#ede9fe", color: "#7c3aed",
+                      }}>
+                        Výchozí
+                      </span>
+                    )}
                     <span style={{
                       padding: "2px 8px", borderRadius: "12px", fontSize: ".7rem", fontWeight: 600,
                       background: form.status === "ACTIVE" ? "#dcfce7" : "#f3f4f6",
