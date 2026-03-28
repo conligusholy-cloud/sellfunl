@@ -10,6 +10,7 @@ export default function Organization() {
     orgs, currentOrg, currentOrgId, setCurrentOrgId,
     members, myRole, invitations,
     createOrg, inviteMember, acceptInvitation, declineInvitation,
+    cancelInvitation, resendInvitation,
     updateMember, removeMember, deleteOrg, reload,
   } = useOrganization();
 
@@ -110,7 +111,8 @@ export default function Organization() {
               onUpdate={updateMember} onRemove={removeMember} />
           )}
           {tab === "invite" && isAdmin && (
-            <InviteTab orgId={currentOrgId} onInvite={inviteMember} onDone={reload} />
+            <InviteTab orgId={currentOrgId} onInvite={inviteMember}
+              onCancel={cancelInvitation} onResend={resendInvitation} onDone={reload} />
           )}
           {tab === "settings" && isOwner && (
             <SettingsTab org={currentOrg} onDelete={() => deleteOrg(currentOrgId)} />
@@ -247,20 +249,22 @@ function MemberRow({ member: m, isAdmin, isOwner, isSelf, onUpdate, onRemove }) 
 }
 
 // ─── Invite Tab ──────────────────────────────────────────────────────────────
-function InviteTab({ orgId, onInvite, onDone }) {
+function InviteTab({ orgId, onInvite, onCancel, onResend, onDone }) {
   const [email, setEmail] = useState("");
   const [role, setRole] = useState("editor");
   const [perms, setPerms] = useState({ pages: "write", domains: "read", funnels: "write", fbAds: "read" });
   const [sending, setSending] = useState(false);
   const [sent, setSent] = useState(false);
+  const [copied, setCopied] = useState(false);
   const [pendingInvites, setPendingInvites] = useState([]);
+  const [refreshKey, setRefreshKey] = useState(0);
 
   useEffect(() => {
     (async () => {
       const snap = await getDocs(query(collection(db, "orgInvitations"), where("orgId", "==", orgId), where("status", "==", "pending")));
       setPendingInvites(snap.docs.map(d => ({ id: d.id, ...d.data() })));
     })();
-  }, [orgId, sent]);
+  }, [orgId, sent, refreshKey]);
 
   async function handleInvite() {
     if (!email.trim()) return;
@@ -307,10 +311,17 @@ function InviteTab({ orgId, onInvite, onDone }) {
           ))}
         </div>
 
-        <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
           <button onClick={handleInvite} disabled={!email.trim() || sending}
             style={{ ...btnPrimary, opacity: !email.trim() ? 0.5 : 1 }}>
             {sending ? "Odesílám..." : "📧 Odeslat pozvánku"}
+          </button>
+          <button onClick={() => {
+            const link = window.location.origin + "/login";
+            navigator.clipboard.writeText(link);
+            setCopied(true); setTimeout(() => setCopied(false), 2000);
+          }} style={{ ...btnSecondary, fontSize: ".82rem", padding: "10px 14px" }}>
+            {copied ? "✓ Zkopírováno" : "🔗 Zkopírovat odkaz"}
           </button>
           {sent && <span style={{ fontSize: ".82rem", color: "#16a34a", fontWeight: 600 }}>✓ Pozvánka odeslána!</span>}
         </div>
@@ -321,18 +332,59 @@ function InviteTab({ orgId, onInvite, onDone }) {
         <div>
           <h4 style={{ fontSize: ".85rem", fontWeight: 600, color: "var(--text-muted)", marginBottom: "10px" }}>Čekající pozvánky</h4>
           {pendingInvites.map(inv => (
-            <div key={inv.id} style={{ ...memberRow, background: "#fef9c320" }}>
-              <div>
-                <div style={{ fontSize: ".85rem", fontWeight: 600, color: "var(--text)" }}>{inv.email}</div>
-                <div style={{ fontSize: ".72rem", color: "var(--text-muted)" }}>
-                  Role: {ROLES[inv.role]?.label} · Čeká na přijetí
-                </div>
-              </div>
-              <span style={{ fontSize: ".65rem", padding: "3px 10px", borderRadius: "8px", background: "#fef3c7", color: "#d97706", fontWeight: 600 }}>Čeká</span>
-            </div>
+            <PendingInviteRow key={inv.id} inv={inv}
+              onCancel={async () => { await onCancel(inv.id); setRefreshKey(k => k + 1); }}
+              onResend={async () => { await onResend(inv.id); setRefreshKey(k => k + 1); }}
+            />
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+// ─── Pending Invite Row ──────────────────────────────────────────────────────
+function PendingInviteRow({ inv, onCancel, onResend }) {
+  const [resent, setResent] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
+
+  const date = inv.createdAt?.toDate?.()?.toLocaleDateString("cs-CZ", { day: "numeric", month: "numeric", year: "numeric", hour: "2-digit", minute: "2-digit" }) || "";
+
+  return (
+    <div style={{ ...memberRow, background: "#fef9c320" }}>
+      <div style={{ flex: 1 }}>
+        <div style={{ fontSize: ".85rem", fontWeight: 600, color: "var(--text)" }}>{inv.email}</div>
+        <div style={{ fontSize: ".72rem", color: "var(--text-muted)", marginTop: "2px" }}>
+          Role: {ROLES[inv.role]?.label} · Odesláno: {date}
+        </div>
+        <div style={{ display: "flex", gap: "6px", marginTop: "6px", flexWrap: "wrap" }}>
+          {MODULES.map(mod => {
+            const perm = (inv.permissions || {})[mod.key] || "none";
+            const cfg = PERMISSIONS[perm];
+            if (perm === "none") return null;
+            return (
+              <span key={mod.key} style={{
+                fontSize: ".6rem", padding: "1px 6px", borderRadius: "5px",
+                background: `${cfg.color}15`, color: cfg.color, fontWeight: 500,
+              }}>
+                {mod.icon} {cfg.label}
+              </span>
+            );
+          })}
+        </div>
+      </div>
+      <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
+        <span style={{ fontSize: ".65rem", padding: "3px 10px", borderRadius: "8px", background: "#fef3c7", color: "#d97706", fontWeight: 600 }}>Čeká</span>
+        <button onClick={async () => { await onResend(); setResent(true); setTimeout(() => setResent(false), 2000); }}
+          style={{ ...btnSmall, color: "#3b82f6" }} title="Znovu odeslat pozvánku">
+          {resent ? "✓" : "📧"}
+        </button>
+        <button onClick={async () => { setCancelling(true); await onCancel(); }}
+          disabled={cancelling}
+          style={{ ...btnSmall, color: "#ef4444" }} title="Zrušit pozvánku">
+          {cancelling ? "..." : "✕"}
+        </button>
+      </div>
     </div>
   );
 }

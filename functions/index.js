@@ -11,6 +11,8 @@ const CF_API_TOKEN    = defineSecret("CLOUDFLARE_API_TOKEN");
 const CF_ACCOUNT_ID   = defineSecret("CLOUDFLARE_ACCOUNT_ID");
 const FB_APP_ID       = defineSecret("FACEBOOK_APP_ID");
 const FB_APP_SECRET   = defineSecret("FACEBOOK_APP_SECRET");
+const SMTP_USER       = defineSecret("SMTP_USER");
+const SMTP_PASS       = defineSecret("SMTP_PASS");
 
 // ─── PŘEKLAD ───────────────────────────────────────────────────────────────
 exports.translate = onCall(
@@ -1451,5 +1453,71 @@ exports.fbDuplicate = onCall(
       return await duplicateAd(sourceId, adDetail.adset_id, targetLanguage, validatedUrl);
     }
     throw new HttpsError("invalid-argument", "Neplatný type.");
+  }
+);
+
+// ─── ODESLÁNÍ POZVÁNKY E-MAILEM ─────────────────────────────────────────────
+exports.sendInvitation = onCall(
+  { region: "us-central1", secrets: [SMTP_USER, SMTP_PASS] },
+  async (request) => {
+    if (!request.auth) throw new HttpsError("unauthenticated", "Musíš být přihlášen.");
+    const { email, orgName, role, inviterName, appUrl } = request.data;
+    if (!email || !orgName) throw new HttpsError("invalid-argument", "Chybí email nebo název organizace.");
+
+    const nodemailer = require("nodemailer");
+
+    const transporter = nodemailer.createTransport({
+      host: "smtp.gmail.com",
+      port: 465,
+      secure: true,
+      auth: {
+        user: process.env.SMTP_USER,
+        pass: process.env.SMTP_PASS,
+      },
+    });
+
+    const loginUrl = appUrl || "https://sellfunl.com/login";
+
+    const roleLabels = { admin: "Administrátor", editor: "Editor", viewer: "Prohlížeč" };
+    const roleLabel = roleLabels[role] || role;
+
+    const html = `
+      <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;max-width:520px;margin:0 auto;padding:32px 24px;background:#fff;border-radius:12px;border:1px solid #e5e7eb;">
+        <div style="text-align:center;margin-bottom:24px;">
+          <h1 style="font-size:1.3rem;color:#1f2937;margin:0;">🏢 Pozvánka do organizace</h1>
+        </div>
+        <p style="font-size:.95rem;color:#374151;line-height:1.6;">
+          ${inviterName || "Někdo"} tě zve do organizace <strong>${orgName}</strong> v aplikaci SellFunl.
+        </p>
+        <div style="background:#f3f0ff;border-radius:8px;padding:14px 18px;margin:16px 0;">
+          <p style="margin:0;font-size:.88rem;color:#6b21a8;"><strong>Role:</strong> ${roleLabel}</p>
+        </div>
+        <p style="font-size:.88rem;color:#6b7280;line-height:1.5;">
+          Pro přijetí pozvánky se přihlaš do SellFunl. Pozvánka na tebe čeká v sekci Organizace.
+        </p>
+        <div style="text-align:center;margin:24px 0;">
+          <a href="${loginUrl}" style="display:inline-block;padding:12px 32px;background:#7c3aed;color:#fff;text-decoration:none;border-radius:8px;font-weight:600;font-size:.95rem;">
+            Přihlásit se do SellFunl
+          </a>
+        </div>
+        <hr style="border:none;border-top:1px solid #e5e7eb;margin:24px 0;" />
+        <p style="font-size:.72rem;color:#9ca3af;text-align:center;margin:0;">
+          Pokud jsi tuto pozvánku nečekal/a, můžeš ji ignorovat.
+        </p>
+      </div>
+    `;
+
+    try {
+      await transporter.sendMail({
+        from: `"SellFunl" <${process.env.SMTP_USER}>`,
+        to: email,
+        subject: `Pozvánka do organizace ${orgName} — SellFunl`,
+        html,
+      });
+      return { success: true };
+    } catch (err) {
+      console.error("Email send error:", err);
+      throw new HttpsError("internal", "Nepodařilo se odeslat e-mail: " + err.message);
+    }
   }
 );

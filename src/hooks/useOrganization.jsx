@@ -4,8 +4,10 @@ import {
   doc, query, where, serverTimestamp, onSnapshot,
 } from "firebase/firestore";
 import { getAuth } from "firebase/auth";
+import { getFunctions, httpsCallable } from "firebase/functions";
 
 const db = getFirestore();
+const functions = getFunctions(undefined, "us-central1");
 
 // ─── Roles & Permissions ────────────────────────────────────────────────────
 export const ROLES = {
@@ -122,11 +124,26 @@ export function OrgProvider({ children }) {
     return docRef.id;
   }
 
-  async function inviteMember(orgId, email, role, permissions) {
+  async function inviteMember(orgId, invEmail, role, permissions) {
     await addDoc(collection(db, "orgInvitations"), {
-      orgId, email: email.toLowerCase(), role, permissions,
+      orgId, email: invEmail.toLowerCase(), role, permissions,
       invitedBy: uid, status: "pending", createdAt: serverTimestamp(),
     });
+
+    // Send email notification
+    const org = orgs.find(o => o.id === orgId);
+    try {
+      const sendInvitation = httpsCallable(functions, "sendInvitation");
+      await sendInvitation({
+        email: invEmail.toLowerCase(),
+        orgName: org?.name || "SellFunl organizace",
+        role,
+        inviterName: email || "Někdo",
+        appUrl: window.location.origin + "/login",
+      });
+    } catch (err) {
+      console.warn("E-mail se nepodařilo odeslat (pozvánka byla vytvořena):", err);
+    }
   }
 
   async function acceptInvitation(invitationId) {
@@ -149,6 +166,32 @@ export function OrgProvider({ children }) {
   async function declineInvitation(invitationId) {
     await updateDoc(doc(db, "orgInvitations", invitationId), { status: "declined" });
     setInvitations(prev => prev.filter(i => i.id !== invitationId));
+  }
+
+  async function cancelInvitation(invitationId) {
+    await deleteDoc(doc(db, "orgInvitations", invitationId));
+  }
+
+  async function resendInvitation(invitationId) {
+    await updateDoc(doc(db, "orgInvitations", invitationId), { createdAt: serverTimestamp() });
+
+    // Re-send email
+    const invDoc = await getDoc(doc(db, "orgInvitations", invitationId));
+    if (!invDoc.exists()) return;
+    const inv = invDoc.data();
+    const org = orgs.find(o => o.id === inv.orgId);
+    try {
+      const sendInvitation = httpsCallable(functions, "sendInvitation");
+      await sendInvitation({
+        email: inv.email,
+        orgName: org?.name || "SellFunl organizace",
+        role: inv.role,
+        inviterName: email || "Někdo",
+        appUrl: window.location.origin + "/login",
+      });
+    } catch (err) {
+      console.warn("E-mail se nepodařilo znovu odeslat:", err);
+    }
   }
 
   async function updateMember(memberId, patch) {
@@ -189,6 +232,7 @@ export function OrgProvider({ children }) {
       members, myRole, myPermissions, loading,
       invitations, createOrg, inviteMember,
       acceptInvitation, declineInvitation,
+      cancelInvitation, resendInvitation,
       updateMember, removeMember, deleteOrg,
       canAccess, reload: loadOrgs,
     }}>
