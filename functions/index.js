@@ -1100,6 +1100,21 @@ exports.fbDuplicate = onCall(
       throw new HttpsError("invalid-argument", "Chybí type, sourceId nebo adAccountId.");
     }
 
+    // Validace URL — odmítni localhost, prázdné a neplatné URL
+    let validatedUrl = newUrl?.trim() || null;
+    if (validatedUrl) {
+      try {
+        const parsed = new URL(validatedUrl);
+        if (parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1" || parsed.hostname.endsWith(".local")) {
+          console.warn(`Ignoruji neplatný overrideUrl (localhost): ${validatedUrl}`);
+          validatedUrl = null;
+        }
+      } catch {
+        console.warn(`Ignoruji neplatný overrideUrl (parse error): ${validatedUrl}`);
+        validatedUrl = null;
+      }
+    }
+
     const { accessToken } = await getFbToken(request.auth.uid);
 
     // Helper: přelož texty přes Anthropic
@@ -1135,7 +1150,7 @@ exports.fbDuplicate = onCall(
     }
 
     // ─── DUPLIKACE REKLAMY ───
-    async function duplicateAd(adId, adSetId, lang, overrideUrl) {
+    async function duplicateAd(adId, adSetId, lang, overrideUrl, isDynamicAdSet = false) {
       const ad = await fbApi(adId, accessToken, { fields: "name,creative" });
       const creativeId = ad.creative?.id;
       if (!creativeId) throw new HttpsError("internal", `Reklama ${adId} nemá kreativu.`);
@@ -1158,56 +1173,10 @@ exports.fbDuplicate = onCall(
 
       let newCreativeBody;
 
-      if (creative.object_story_spec?.link_data) {
-        const oss = creative.object_story_spec;
-        const ld = oss.link_data;
-        const texts = [ld.message || "", ld.name || "", ld.description || ""];
-        const translated = lang ? await translateTexts(texts, lang) : texts;
-
-        const linkUrl = overrideUrl || ld.link;
-        const cleanLinkData = {
-          message: translated[0] || "",
-          name: translated[1] || "",
-          description: translated[2] || "",
-        };
-        if (linkUrl) cleanLinkData.link = linkUrl;
-        if (ld.image_hash) cleanLinkData.image_hash = ld.image_hash;
-        else if (ld.picture) cleanLinkData.picture = ld.picture;
-        if (ld.call_to_action?.type) {
-          cleanLinkData.call_to_action = { type: ld.call_to_action.type };
-          if (linkUrl) cleanLinkData.call_to_action.value = { link: linkUrl };
-        }
-
-        newCreativeBody = {
-          name: `Creative - ${newName}`,
-          object_story_spec: { page_id: oss.page_id, link_data: cleanLinkData },
-        };
-
-      } else if (creative.object_story_spec?.video_data) {
-        const oss = creative.object_story_spec;
-        const vd = oss.video_data;
-        const texts = [vd.message || "", vd.title || ""];
-        const translated = lang ? await translateTexts(texts, lang) : texts;
-
-        const linkUrl = overrideUrl || vd.call_to_action?.value?.link;
-        const cleanVideoData = {
-          message: translated[0] || "",
-          title: translated[1] || "",
-        };
-        if (vd.video_id) cleanVideoData.video_id = vd.video_id;
-        if (vd.image_hash) cleanVideoData.image_hash = vd.image_hash;
-        else if (vd.image_url) cleanVideoData.image_url = vd.image_url;
-        if (vd.call_to_action?.type) {
-          cleanVideoData.call_to_action = { type: vd.call_to_action.type };
-          if (linkUrl) cleanVideoData.call_to_action.value = { link: linkUrl };
-        }
-
-        newCreativeBody = {
-          name: `Creative - ${newName}`,
-          object_story_spec: { page_id: oss.page_id, video_data: cleanVideoData },
-        };
-
-      } else if (creative.asset_feed_spec) {
+      // DŮLEŽITÉ: asset_feed_spec (dynamic creative) MUSÍ být kontrolován PRVNÍ,
+      // protože FB může vrátit kreativu s oběma poli (object_story_spec i asset_feed_spec).
+      // Pokud ad set je dynamic creative, musíme použít asset_feed_spec formát.
+      if (creative.asset_feed_spec) {
         // Dynamic creative — vytvoř ČISTÝ asset_feed_spec od nuly, jen s potřebnými poli
         const origAfs = creative.asset_feed_spec;
 
@@ -1264,6 +1233,55 @@ exports.fbDuplicate = onCall(
           newCreativeBody.object_story_spec = { page_id: creative.object_story_spec.page_id };
         }
 
+      } else if (creative.object_story_spec?.link_data) {
+        const oss = creative.object_story_spec;
+        const ld = oss.link_data;
+        const texts = [ld.message || "", ld.name || "", ld.description || ""];
+        const translated = lang ? await translateTexts(texts, lang) : texts;
+
+        const linkUrl = overrideUrl || ld.link;
+        const cleanLinkData = {
+          message: translated[0] || "",
+          name: translated[1] || "",
+          description: translated[2] || "",
+        };
+        if (linkUrl) cleanLinkData.link = linkUrl;
+        if (ld.image_hash) cleanLinkData.image_hash = ld.image_hash;
+        else if (ld.picture) cleanLinkData.picture = ld.picture;
+        if (ld.call_to_action?.type) {
+          cleanLinkData.call_to_action = { type: ld.call_to_action.type };
+          if (linkUrl) cleanLinkData.call_to_action.value = { link: linkUrl };
+        }
+
+        newCreativeBody = {
+          name: `Creative - ${newName}`,
+          object_story_spec: { page_id: oss.page_id, link_data: cleanLinkData },
+        };
+
+      } else if (creative.object_story_spec?.video_data) {
+        const oss = creative.object_story_spec;
+        const vd = oss.video_data;
+        const texts = [vd.message || "", vd.title || ""];
+        const translated = lang ? await translateTexts(texts, lang) : texts;
+
+        const linkUrl = overrideUrl || vd.call_to_action?.value?.link;
+        const cleanVideoData = {
+          message: translated[0] || "",
+          title: translated[1] || "",
+        };
+        if (vd.video_id) cleanVideoData.video_id = vd.video_id;
+        if (vd.image_hash) cleanVideoData.image_hash = vd.image_hash;
+        else if (vd.image_url) cleanVideoData.image_url = vd.image_url;
+        if (vd.call_to_action?.type) {
+          cleanVideoData.call_to_action = { type: vd.call_to_action.type };
+          if (linkUrl) cleanVideoData.call_to_action.value = { link: linkUrl };
+        }
+
+        newCreativeBody = {
+          name: `Creative - ${newName}`,
+          object_story_spec: { page_id: oss.page_id, video_data: cleanVideoData },
+        };
+
       } else {
         // Neznámý formát — použij originální kreativu bez překladu
         console.warn(`Reklama ${adId}: neznámý formát kreativy, kopíruji bez překladu.`);
@@ -1282,12 +1300,68 @@ exports.fbDuplicate = onCall(
         });
         return { adId: newAd.id };
       } catch (creativeErr) {
-        // Fallback: vytvoř reklamu s originální kreativou, reportuj chybu překladu
-        console.error(`Kreativa selhala (${creativeErr.message}), fallback na originální.`);
-        const newAd = await fbApiPost(`${adAccountId}/ads`, accessToken, {
-          name: newName, adset_id: adSetId, creative: { creative_id: creativeId }, status: "PAUSED",
-        });
-        return { adId: newAd.id, warning: `Překlad selhal: ${creativeErr.message}` };
+        // Fallback: pokud je dynamic creative ad set, nemůžeme jen použít creative_id
+        console.error(`Kreativa selhala (${creativeErr.message}), fallback...`);
+
+        if (isDynamicAdSet && creative.asset_feed_spec) {
+          // Pokus 2: Zkopíruj originální asset_feed_spec BEZ překladu, jen s URL override
+          console.log(`Dynamic creative fallback: kopíruji originální AFS bez překladu.`);
+          try {
+            const origAfs = creative.asset_feed_spec;
+            const fallbackAfs = {
+              bodies: (origAfs.bodies || []).map(b => ({ text: b.text })),
+              titles: (origAfs.titles || []).map(t => ({ text: t.text })),
+              descriptions: (origAfs.descriptions || []).map(d => ({ text: d.text })),
+            };
+            if (origAfs.images) fallbackAfs.images = origAfs.images.map(img => ({ hash: img.hash || img.image_hash })).filter(i => i.hash);
+            if (origAfs.videos) fallbackAfs.videos = origAfs.videos.map(vid => {
+              const v = {};
+              if (vid.video_id) v.video_id = vid.video_id;
+              if (vid.thumbnail_hash) v.thumbnail_hash = vid.thumbnail_hash;
+              return v;
+            }).filter(v => v.video_id);
+            if (overrideUrl) {
+              fallbackAfs.link_urls = [{ website_url: overrideUrl }];
+            } else if (origAfs.link_urls) {
+              fallbackAfs.link_urls = origAfs.link_urls.map(lu => {
+                const clean = {};
+                if (lu.website_url) clean.website_url = lu.website_url;
+                if (lu.display_url) clean.display_url = lu.display_url;
+                return clean;
+              });
+            }
+            if (origAfs.call_to_action_types) fallbackAfs.call_to_action_types = origAfs.call_to_action_types;
+            if (origAfs.ad_formats) fallbackAfs.ad_formats = origAfs.ad_formats;
+
+            const fallbackBody = { name: `Creative - ${newName}`, asset_feed_spec: fallbackAfs };
+            if (creative.object_story_spec?.page_id) {
+              fallbackBody.object_story_spec = { page_id: creative.object_story_spec.page_id };
+            }
+            console.log(`Fallback AFS:`, JSON.stringify(fallbackAfs).slice(0, 500));
+            const fbCreative = await fbApiPost(`${adAccountId}/adcreatives`, accessToken, fallbackBody);
+            const newAd = await fbApiPost(`${adAccountId}/ads`, accessToken, {
+              name: newName, adset_id: adSetId, creative: { creative_id: fbCreative.id }, status: "PAUSED",
+            });
+            return { adId: newAd.id, warning: `Překlad selhal, použit originální text: ${creativeErr.message}` };
+          } catch (fallbackErr) {
+            console.error(`Dynamic fallback also failed:`, fallbackErr.message);
+            // Poslední pokus: použij přímo creative_id originálu
+            try {
+              const newAd = await fbApiPost(`${adAccountId}/ads`, accessToken, {
+                name: newName, adset_id: adSetId, creative: { creative_id: creativeId }, status: "PAUSED",
+              });
+              return { adId: newAd.id, warning: `Překlad selhal, použit originál: ${fallbackErr.message}` };
+            } catch (lastErr) {
+              throw new Error(`Kreativa i fallback selhaly: ${creativeErr.message} → ${fallbackErr.message} → ${lastErr.message}`);
+            }
+          }
+        } else {
+          // Nedynamický ad set — klasický fallback
+          const newAd = await fbApiPost(`${adAccountId}/ads`, accessToken, {
+            name: newName, adset_id: adSetId, creative: { creative_id: creativeId }, status: "PAUSED",
+          });
+          return { adId: newAd.id, warning: `Překlad selhal: ${creativeErr.message}` };
+        }
       }
     }
 
@@ -1330,7 +1404,7 @@ exports.fbDuplicate = onCall(
       for (const ad of (ads.data || [])) {
         try {
           console.log(`Kopíruji reklamu ${ad.id} (${ad.name})...`);
-          adResults.push(await duplicateAd(ad.id, newAdSet.id, lang, overrideUrl));
+          adResults.push(await duplicateAd(ad.id, newAdSet.id, lang, overrideUrl, isDynamic));
         } catch (err) {
           console.error(`CHYBA duplikace reklamy ${ad.id}:`, err.message || err);
           adErrors.push(`${ad.name || ad.id}: ${err.message}`);
@@ -1367,14 +1441,14 @@ exports.fbDuplicate = onCall(
       return { campaignId: newCamp.id, adSets: adSetResults, adSetErrors };
     }
 
-    if (type === "campaign") return await duplicateCampaign(sourceId, targetLanguage, newTargeting, newUrl);
+    if (type === "campaign") return await duplicateCampaign(sourceId, targetLanguage, newTargeting, validatedUrl);
     if (type === "adset") {
       if (!campaignId) throw new HttpsError("invalid-argument", "Chybí campaignId.");
-      return await duplicateAdSet(sourceId, campaignId, targetLanguage, newTargeting, newUrl);
+      return await duplicateAdSet(sourceId, campaignId, targetLanguage, newTargeting, validatedUrl);
     }
     if (type === "ad") {
       const adDetail = await fbApi(sourceId, accessToken, { fields: "adset_id" });
-      return await duplicateAd(sourceId, adDetail.adset_id, targetLanguage, newUrl);
+      return await duplicateAd(sourceId, adDetail.adset_id, targetLanguage, validatedUrl);
     }
     throw new HttpsError("invalid-argument", "Neplatný type.");
   }

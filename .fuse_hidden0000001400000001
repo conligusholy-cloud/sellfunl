@@ -1,0 +1,26 @@
+[debug] [2026-03-28T09:27:40.727Z] ----------------------------------------------------------------------
+[debug] [2026-03-28T09:27:40.728Z] Command:       /usr/bin/node /sessions/zealous-ecstatic-brahmagupta/.npm-global/bin/firebase deploy --only functions
+[debug] [2026-03-28T09:27:40.728Z] CLI Version:   15.11.0
+[debug] [2026-03-28T09:27:40.729Z] Platform:      linux
+[debug] [2026-03-28T09:27:40.729Z] Node Version:  v22.22.0
+[debug] [2026-03-28T09:27:40.729Z] Time:          Sat Mar 28 2026 10:27:40 GMT+0100 (Central European Standard Time)
+[debug] [2026-03-28T09:27:40.729Z] ----------------------------------------------------------------------
+[debug] 
+[debug] [2026-03-28T09:27:40.730Z] >>> [apiv2][query] GET https://firebase-public.firebaseio.com/cli.json [none]
+[debug] [2026-03-28T09:27:41.476Z] > command requires scopes: ["email","openid","https://www.googleapis.com/auth/cloudplatformprojects.readonly","https://www.googleapis.com/auth/firebase","https://www.googleapis.com/auth/cloud-platform"]
+[debug] [2026-03-28T09:27:41.508Z] Error: Could not load the default credentials. Browse to https://cloud.google.com/docs/authentication/getting-started for more information.
+    at GoogleAuth.getApplicationDefaultAsync (/sessions/zealous-ecstatic-brahmagupta/.npm-global/lib/node_modules/firebase-tools/node_modules/google-auth-library/build/src/auth/googleauth.js:287:15)
+    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+    at async GoogleAuth._GoogleAuth_determineClient (/sessions/zealous-ecstatic-brahmagupta/.npm-global/lib/node_modules/firebase-tools/node_modules/google-auth-library/build/src/auth/googleauth.js:834:32)
+    at async GoogleAuth.getClient (/sessions/zealous-ecstatic-brahmagupta/.npm-global/lib/node_modules/firebase-tools/node_modules/google-auth-library/build/src/auth/googleauth.js:698:20)
+    at async GoogleAuth.getAccessToken (/sessions/zealous-ecstatic-brahmagupta/.npm-global/lib/node_modules/firebase-tools/node_modules/google-auth-library/build/src/auth/googleauth.js:722:24)
+    at async autoAuth (/sessions/zealous-ecstatic-brahmagupta/.npm-global/lib/node_modules/firebase-tools/lib/requireAuth.js:28:19)
+    at async requireAuth (/sessions/zealous-ecstatic-brahmagupta/.npm-global/lib/node_modules/firebase-tools/lib/requireAuth.js:90:20)
+    at async requirePermissions (/sessions/zealous-ecstatic-brahmagupta/.npm-global/lib/node_modules/firebase-tools/lib/requirePermissions.js:17:5)
+    at async /sessions/zealous-ecstatic-brahmagupta/.npm-global/lib/node_modules/firebase-tools/lib/command.js:264:17
+[error] 
+[error] Error: Failed to authenticate, have you run firebase login?
+[debug] [2026-03-28T09:27:41.512Z] <<< [apiv2][status] GET https://firebase-public.firebaseio.com/cli.json 403
+[debug] [2026-03-28T09:27:41.512Z] <<< [apiv2][body] GET https://firebase-public.firebaseio.com/cli.json "Connection blocked by network allowlist"
+[warn] ⚠  Unable to fetch the CLI MOTD and remote config. This is not a fatal error, but may indicate an issue with your network connection. 
+[debug] [2026-03-28T09:27:41.513Z] Failed to fetch MOTD FirebaseError: Unable to parse JSON: SyntaxError: Unexpected token 'C', "Connection"... is not valid JSON
