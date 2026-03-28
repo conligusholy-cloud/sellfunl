@@ -10,6 +10,7 @@ import logo from "../assets/logo.svg";
 const menuItems = [
   { icon: "🏠", label: "Přehled",    path: "/dashboard" },
   { icon: "📄", label: "Stránky",    path: "/pages" },
+  { icon: "🔀", label: "Funely",     path: "/funnels" },
   { icon: "🌐", label: "Domény",     path: "/domains" },
   { icon: "📣", label: "FB reklamy", path: "/fb-ads" },
 ];

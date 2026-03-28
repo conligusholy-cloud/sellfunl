@@ -13,6 +13,7 @@ import PublicPage    from "./pages/PublicPage";
 import Domains       from "./pages/Domains";
 import FacebookAds   from "./pages/modules/FacebookAds";
 import FacebookCallback from "./pages/modules/FacebookCallback";
+import Funnels       from "./pages/modules/Funnels";
 
 // Komponenty
 import PrivateRoute  from "./components/PrivateRoute";
@@ -44,6 +45,7 @@ export default function App() {
             <Route path="/dashboard"  element={<></>} />
             <Route path="/pages"      element={<Pages />} />
             <Route path="/editor/:id" element={<PageEditor />} />
+            <Route path="/funnels"    element={<Funnels />} />
             <Route path="/domains"    element={<Domains />} />
             <Route path="/fb-ads"     element={<FacebookAds />} />
           </Route>
