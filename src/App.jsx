@@ -14,9 +14,11 @@ import Domains       from "./pages/Domains";
 import FacebookAds   from "./pages/modules/FacebookAds";
 import FacebookCallback from "./pages/modules/FacebookCallback";
 import Funnels       from "./pages/modules/Funnels";
+import Organization  from "./pages/modules/Organization";
 
 // Komponenty
 import PrivateRoute  from "./components/PrivateRoute";
+import { OrgProvider } from "./hooks/useOrganization.jsx";
 
 export default function App() {
   const { user, loading } = useAuthState();
@@ -41,13 +43,14 @@ export default function App() {
         {/* Chráněné stránky (vyžadují přihlášení) */}
         <Route element={<PrivateRoute user={user} />}>
           {/* Dashboard jako layout — sidebar + header na všech podstránkách */}
-          <Route element={<Dashboard />}>
-            <Route path="/dashboard"  element={<></>} />
-            <Route path="/pages"      element={<Pages />} />
-            <Route path="/editor/:id" element={<PageEditor />} />
-            <Route path="/funnels"    element={<Funnels />} />
-            <Route path="/domains"    element={<Domains />} />
-            <Route path="/fb-ads"     element={<FacebookAds />} />
+          <Route element={<OrgProvider><Dashboard /></OrgProvider>}>
+            <Route path="/dashboard"     element={<></>} />
+            <Route path="/pages"         element={<Pages />} />
+            <Route path="/editor/:id"    element={<PageEditor />} />
+            <Route path="/funnels"       element={<Funnels />} />
+            <Route path="/domains"       element={<Domains />} />
+            <Route path="/fb-ads"        element={<FacebookAds />} />
+            <Route path="/organization"  element={<Organization />} />
           </Route>
         </Route>
 

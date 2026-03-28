@@ -8,11 +8,12 @@ import AIAssistant from "../components/AIAssistant";
 import logo from "../assets/logo.svg";
 
 const menuItems = [
-  { icon: "🏠", label: "Přehled",    path: "/dashboard" },
-  { icon: "📄", label: "Stránky",    path: "/pages" },
-  { icon: "🔀", label: "Funely",     path: "/funnels" },
-  { icon: "🌐", label: "Domény",     path: "/domains" },
-  { icon: "📣", label: "FB reklamy", path: "/fb-ads" },
+  { icon: "🏠", label: "Přehled",      path: "/dashboard" },
+  { icon: "📄", label: "Stránky",      path: "/pages" },
+  { icon: "🔀", label: "Funely",       path: "/funnels" },
+  { icon: "🌐", label: "Domény",       path: "/domains" },
+  { icon: "📣", label: "FB reklamy",   path: "/fb-ads" },
+  { icon: "🏢", label: "Organizace",   path: "/organization" },
 ];
 
 export default function Dashboard() {
