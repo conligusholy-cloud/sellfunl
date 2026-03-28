@@ -81,7 +81,7 @@ export default function FacebookAds() {
       )}
 
       {activeTab === "bulk" && fbAccount && (
-        <BulkGenerator fbAccount={fbAccount} />
+        <BulkGenerator fbAccount={fbAccount} onNavigate={setActiveTab} />
       )}
 
       {activeTab === "forms" && fbAccount && (

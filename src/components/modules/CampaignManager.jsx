@@ -2232,20 +2232,22 @@ function DuplicateModal({ target, onClose, onDone }) {
                     }
                   });
                   const PageButton = ({ p }) => {
-                    const selectUrl = p.url || `https://${window.location.host}/p/${p.id}`;
-                    const isSelected = newUrl === selectUrl;
+                    const selectUrl = p.url; // Jen veřejné URL, ne localhost
+                    const canSelect = !!selectUrl;
+                    const isSelected = canSelect && newUrl === selectUrl;
                     return (
                       <div style={{ display: "flex", alignItems: "center", gap: "4px", width: "100%" }}>
-                        <button onClick={() => setNewUrl(selectUrl)} style={{
+                        <button onClick={() => canSelect && setNewUrl(selectUrl)} style={{
                           flex: 1, padding: "6px 10px", borderRadius: "6px", fontSize: ".78rem",
-                          textAlign: "left", cursor: "pointer", transition: "all .15s",
+                          textAlign: "left", cursor: canSelect ? "pointer" : "not-allowed", transition: "all .15s",
                           border: isSelected ? "2px solid #7c3aed" : "1px solid var(--border)",
                           background: isSelected ? "#f5f3ff" : "transparent",
-                          color: isSelected ? "#7c3aed" : "var(--text)",
+                          color: !canSelect ? "#aaa" : isSelected ? "#7c3aed" : "var(--text)",
+                          opacity: canSelect ? 1 : 0.6,
                         }}>
-                          <div style={{ fontWeight: 600 }}>{p.name}</div>
+                          <div style={{ fontWeight: 600 }}>{p.name}{!canSelect && <span style={{ fontSize: ".6rem", color: "#d97706", marginLeft: "6px" }}>bez domény</span>}</div>
                           <div style={{ fontSize: ".68rem", color: "var(--text-muted)", marginTop: "1px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                            {selectUrl}
+                            {selectUrl || "Nastavte doménu v nastavení stránky"}
                           </div>
                         </button>
                         <a href={p.previewUrl} target="_blank" rel="noopener noreferrer"

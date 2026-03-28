@@ -34,85 +34,7 @@ const COUNTRIES = [
 ];
 
 function emptyRow() {
-  return { id: Date.now(), lang: "cs", countries: ["CZ"], url: "", urlMode: "page", status: null, error: null };
-}
-
-// ─── Dropdown pro výběr zemí (multi-select) ──────────────────────────────────
-function CountryDropdown({ countries, onChange, disabled }) {
-  const [open, setOpen] = useState(false);
-  const ref = useRef(null);
-
-  useEffect(() => {
-    function handleClick(e) {
-      if (ref.current && !ref.current.contains(e.target)) setOpen(false);
-    }
-    document.addEventListener("mousedown", handleClick);
-    return () => document.removeEventListener("mousedown", handleClick);
-  }, []);
-
-  const summary = countries.length === 0
-    ? "Vybrat…"
-    : countries.length <= 3
-      ? countries.map(c => COUNTRIES.find(x => x.value === c)?.label || c).join(", ")
-      : `${countries.slice(0, 2).map(c => COUNTRIES.find(x => x.value === c)?.label || c).join(", ")} +${countries.length - 2}`;
-
-  function toggle(code) {
-    if (disabled) return;
-    const has = countries.includes(code);
-    onChange(has ? countries.filter(c => c !== code) : [...countries, code]);
-  }
-
-  return (
-    <div ref={ref} style={{ position: "relative", flex: 1, minWidth: 0 }}>
-      <button onClick={() => !disabled && setOpen(!open)}
-        style={{
-          width: "100%", padding: "6px 24px 6px 8px", borderRadius: "6px",
-          border: "1px solid var(--border)", background: "var(--bg)",
-          color: countries.length > 0 ? "var(--text)" : "var(--text-muted)",
-          fontSize: ".78rem", textAlign: "left", cursor: disabled ? "not-allowed" : "pointer",
-          whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
-          position: "relative",
-        }}>
-        {summary}
-        <span style={{ position: "absolute", right: "6px", top: "50%", transform: "translateY(-50%)", fontSize: ".6rem", color: "var(--text-muted)" }}>
-          {open ? "▲" : "▼"}
-        </span>
-      </button>
-      {open && (
-        <div style={{
-          position: "absolute", top: "100%", left: 0, right: 0, zIndex: 50,
-          marginTop: "2px", padding: "6px", borderRadius: "8px",
-          background: "var(--bg-card)", border: "1px solid var(--border)",
-          boxShadow: "0 4px 16px rgba(0,0,0,.12)", maxHeight: "220px", overflowY: "auto",
-          display: "grid", gridTemplateColumns: "1fr 1fr", gap: "2px",
-        }}>
-          {COUNTRIES.map(c => {
-            const active = countries.includes(c.value);
-            return (
-              <button key={c.value} onClick={() => toggle(c.value)}
-                style={{
-                  padding: "4px 8px", borderRadius: "5px", fontSize: ".72rem",
-                  border: "none", cursor: "pointer", textAlign: "left",
-                  background: active ? "#f5f3ff" : "transparent",
-                  color: active ? "#7c3aed" : "var(--text)",
-                  fontWeight: active ? 600 : 400,
-                  display: "flex", alignItems: "center", gap: "4px",
-                }}>
-                <span style={{
-                  width: "14px", height: "14px", borderRadius: "3px", flexShrink: 0,
-                  border: active ? "1.5px solid #7c3aed" : "1px solid #d1d5db",
-                  background: active ? "#7c3aed" : "transparent",
-                  display: "inline-flex", alignItems: "center", justifyContent: "center",
-                  fontSize: ".55rem", color: "#fff",
-                }}>{active ? "✓" : ""}</span>
-                {c.label}
-              </button>
-            );
-          })}
-        </div>
-      )}
-    </div>
-  );
+  return { id: Date.now(), lang: "cs", country: "CZ", url: "", urlMode: "page", status: null, error: null };
 }
 
 // ─── Dropdown pro výběr stránky / URL ────────────────────────────────────────
@@ -209,20 +131,22 @@ function UrlDropdown({ url, urlMode, pages, folders, openFolders, setOpenFolders
                     {openFolders[folder.id] && (
                       <div style={{ paddingLeft: "16px", display: "flex", flexDirection: "column", gap: "2px", marginTop: "2px" }}>
                         {folderPages.map(p => {
-                          const pUrl = p.url || `https://${window.location.host}/p/${p.id}`;
-                          const isActive = url === pUrl;
+                          const pUrl = p.url; // Jen veřejné URL (s doménou/btnUrl)
+                          const isActive = pUrl && url === pUrl;
+                          const canSelect = !!pUrl;
                           return (
                             <div key={p.id} style={{ display: "flex", alignItems: "center", gap: "4px" }}>
-                              <button onClick={() => { onSelectUrl(pUrl); setOpen(false); }}
+                              <button onClick={() => { if (canSelect) { onSelectUrl(pUrl); setOpen(false); } }}
                                 style={{
                                   flex: 1, padding: "5px 8px", borderRadius: "6px", fontSize: ".75rem",
-                                  textAlign: "left", cursor: "pointer",
+                                  textAlign: "left", cursor: canSelect ? "pointer" : "not-allowed",
                                   border: isActive ? "1.5px solid #7c3aed" : "1px solid transparent",
                                   background: isActive ? "#f5f3ff" : "transparent",
-                                  color: isActive ? "#7c3aed" : "var(--text)", fontWeight: isActive ? 600 : 400,
+                                  color: !canSelect ? "#aaa" : isActive ? "#7c3aed" : "var(--text)",
+                                  fontWeight: isActive ? 600 : 400, opacity: canSelect ? 1 : 0.6,
                                 }}>
-                                <div>{p.name}</div>
-                                {pUrl.startsWith("http") && <div style={{ fontSize: ".65rem", color: "var(--text-muted)", marginTop: "1px" }}>{pUrl}</div>}
+                                <div>{p.name}{!canSelect && <span style={{ fontSize: ".6rem", color: "#d97706", marginLeft: "6px" }}>bez domény</span>}</div>
+                                {pUrl && <div style={{ fontSize: ".65rem", color: "var(--text-muted)", marginTop: "1px" }}>{pUrl}</div>}
                               </button>
                               <a href={p.previewUrl} target="_blank" rel="noopener noreferrer"
                                 onClick={e => e.stopPropagation()}
@@ -241,20 +165,22 @@ function UrlDropdown({ url, urlMode, pages, folders, openFolders, setOpenFolders
                 <div style={{ fontSize: ".68rem", color: "var(--text-muted)", fontWeight: 600, padding: "4px 0 2px", marginTop: "4px" }}>Bez složky</div>
               )}
               {pages.filter(p => !p.folderId).map(p => {
-                const pUrl = p.url || `https://${window.location.host}/p/${p.id}`;
-                const isActive = url === pUrl;
+                const pUrl = p.url;
+                const isActive = pUrl && url === pUrl;
+                const canSelect = !!pUrl;
                 return (
                   <div key={p.id} style={{ display: "flex", alignItems: "center", gap: "4px" }}>
-                    <button onClick={() => { onSelectUrl(pUrl); setOpen(false); }}
+                    <button onClick={() => { if (canSelect) { onSelectUrl(pUrl); setOpen(false); } }}
                       style={{
                         flex: 1, padding: "5px 8px", borderRadius: "6px", fontSize: ".75rem",
-                        textAlign: "left", cursor: "pointer",
+                        textAlign: "left", cursor: canSelect ? "pointer" : "not-allowed",
                         border: isActive ? "1.5px solid #7c3aed" : "1px solid transparent",
                         background: isActive ? "#f5f3ff" : "transparent",
-                        color: isActive ? "#7c3aed" : "var(--text)", fontWeight: isActive ? 600 : 400,
+                        color: !canSelect ? "#aaa" : isActive ? "#7c3aed" : "var(--text)",
+                        fontWeight: isActive ? 600 : 400, opacity: canSelect ? 1 : 0.6,
                       }}>
-                      <div>{p.name}</div>
-                      {pUrl.startsWith("http") && <div style={{ fontSize: ".65rem", color: "var(--text-muted)", marginTop: "1px" }}>{pUrl}</div>}
+                      <div>{p.name}{!canSelect && <span style={{ fontSize: ".6rem", color: "#d97706", marginLeft: "6px" }}>bez domény</span>}</div>
+                      {pUrl && <div style={{ fontSize: ".65rem", color: "var(--text-muted)", marginTop: "1px" }}>{pUrl}</div>}
                     </button>
                     <a href={p.previewUrl} target="_blank" rel="noopener noreferrer"
                       onClick={e => e.stopPropagation()}
@@ -272,7 +198,7 @@ function UrlDropdown({ url, urlMode, pages, folders, openFolders, setOpenFolders
 }
 
 // ─── Hlavní komponenta ───────────────────────────────────────────────────────
-export default function BulkGenerator({ fbAccount }) {
+export default function BulkGenerator({ fbAccount, onNavigate }) {
   const [adAccountId, setAdAccountId] = useState(() => {
     try { return localStorage.getItem("sellfunl_default_ad_account") || ""; } catch { return ""; }
   });
@@ -318,7 +244,10 @@ export default function BulkGenerator({ fbAccount }) {
         const p = { id: d.id, ...d.data() };
         let url = "";
         if (p.domain) url = `https://${p.domain}${p.slug ? "/" + p.slug : ""}`;
-        return { id: p.id, name: p.name || "Bez názvu", url, previewUrl: p.domain ? url : `/p/${p.id}`, folderId: p.folderId || null };
+        // btnUrl jako alternativa pro stránky bez domény
+        if (!url && p.btnUrl) url = p.btnUrl;
+        const previewUrl = p.domain ? url : `/p/${p.id}`;
+        return { id: p.id, name: p.name || "Bez názvu", url, previewUrl, folderId: p.folderId || null, hasDomain: !!p.domain };
       }));
       setUserFolders(fSnap.docs.map(d => ({ id: d.id, ...d.data() })));
     }).catch(() => {});
@@ -351,7 +280,7 @@ export default function BulkGenerator({ fbAccount }) {
           sourceId: selectedCampaign,
           adAccountId,
           targetLanguage: row.lang || null,
-          newTargeting: row.countries.length > 0 ? { geo_locations: { countries: row.countries } } : null,
+          newTargeting: row.country ? { geo_locations: { countries: [row.country] } } : null,
         };
         if (row.url?.trim()) params.newUrl = row.url.trim();
 
@@ -472,12 +401,18 @@ export default function BulkGenerator({ fbAccount }) {
                     ))}
                   </select>
 
-                  {/* Země — custom dropdown */}
-                  <CountryDropdown
-                    countries={row.countries}
-                    onChange={vals => updateRow(row.id, "countries", vals)}
+                  {/* Země — single select */}
+                  <select value={row.country} onChange={e => updateRow(row.id, "country", e.target.value)}
                     disabled={generating}
-                  />
+                    style={{
+                      flex: 1, minWidth: 0, padding: "6px 8px", borderRadius: "6px",
+                      border: "1px solid var(--border)", background: "var(--bg)",
+                      color: "var(--text)", fontSize: ".78rem", outline: "none",
+                    }}>
+                    {COUNTRIES.map(c => (
+                      <option key={c.value} value={c.value}>{c.label}</option>
+                    ))}
+                  </select>
 
                   {/* URL — custom dropdown */}
                   <UrlDropdown
@@ -544,16 +479,37 @@ export default function BulkGenerator({ fbAccount }) {
             </span>
           </div>
 
-          {/* Tlačítko generovat */}
-          <button onClick={generate} disabled={generating || rows.length === 0}
-            style={{
-              padding: "12px 28px", borderRadius: "8px", border: "none",
-              background: generating ? "#93c5fd" : allDone ? "#16a34a" : "#0ea5e9",
-              color: "#fff", cursor: generating ? "not-allowed" : "pointer",
-              fontWeight: 700, fontSize: ".95rem", width: "100%",
-            }}>
-            {generating ? "⏳ Generuji..." : allDone ? "✅ Hotovo — Generovat znovu" : `🚀 Generovat ${rows.length} ${rows.length === 1 ? "kopii" : rows.length < 5 ? "kopie" : "kopií"}`}
-          </button>
+          {/* Tlačítka */}
+          {allDone ? (
+            <div style={{ display: "flex", gap: "8px" }}>
+              <button onClick={() => onNavigate?.("campaigns")}
+                style={{
+                  flex: 1, padding: "12px 28px", borderRadius: "8px", border: "none",
+                  background: "#16a34a", color: "#fff", cursor: "pointer",
+                  fontWeight: 700, fontSize: ".95rem",
+                }}>
+                ✅ Hotovo — Zobrazit kampaně
+              </button>
+              <button onClick={generate}
+                style={{
+                  padding: "12px 20px", borderRadius: "8px", border: "1px solid var(--border)",
+                  background: "var(--bg)", color: "var(--text)", cursor: "pointer",
+                  fontWeight: 500, fontSize: ".85rem",
+                }}>
+                🔄 Znovu
+              </button>
+            </div>
+          ) : (
+            <button onClick={generate} disabled={generating || rows.length === 0}
+              style={{
+                padding: "12px 28px", borderRadius: "8px", border: "none",
+                background: generating ? "#93c5fd" : "#0ea5e9",
+                color: "#fff", cursor: generating ? "not-allowed" : "pointer",
+                fontWeight: 700, fontSize: ".95rem", width: "100%",
+              }}>
+              {generating ? "⏳ Generuji..." : `🚀 Generovat ${rows.length} ${rows.length === 1 ? "kopii" : rows.length < 5 ? "kopie" : "kopií"}`}
+            </button>
+          )}
         </>
       )}
     </div>
