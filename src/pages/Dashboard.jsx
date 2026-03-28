@@ -127,6 +127,7 @@ export default function Dashboard() {
             {isMobile && <img src={logo} alt="SellFunl" style={{ height:"24px" }} />}
           </div>
           <div style={{ display:"flex", alignItems:"center", gap:"8px", marginLeft:"auto" }}>
+            {!isMobile && <span style={{ fontSize:".7rem", color:"var(--text-muted)", opacity: 0.6 }} title="Verze aplikace">v{__APP_VERSION__}</span>}
             {!isMobile && <span style={{ fontSize:".85rem", color:"var(--text-muted)" }}>{user?.email}</span>}
             <button onClick={() => setTheme(t => t === "light" ? "dark" : "light")}
               style={{ padding:"7px 12px", borderRadius:"8px", border:"none", cursor:"pointer", background:"#ede9fe", color:"#7c3aed", fontWeight:600, fontSize:".85rem" }}>
