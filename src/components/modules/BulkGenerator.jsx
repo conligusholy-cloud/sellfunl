@@ -131,22 +131,21 @@ function UrlDropdown({ url, urlMode, pages, folders, openFolders, setOpenFolders
                     {openFolders[folder.id] && (
                       <div style={{ paddingLeft: "16px", display: "flex", flexDirection: "column", gap: "2px", marginTop: "2px" }}>
                         {folderPages.map(p => {
-                          const pUrl = p.url; // Jen veřejné URL (s doménou/btnUrl)
-                          const isActive = pUrl && url === pUrl;
-                          const canSelect = !!pUrl;
+                          const pUrl = p.url;
+                          const isActive = url === pUrl;
                           return (
                             <div key={p.id} style={{ display: "flex", alignItems: "center", gap: "4px" }}>
-                              <button onClick={() => { if (canSelect) { onSelectUrl(pUrl); setOpen(false); } }}
+                              <button onClick={() => { onSelectUrl(pUrl); setOpen(false); }}
                                 style={{
                                   flex: 1, padding: "5px 8px", borderRadius: "6px", fontSize: ".75rem",
-                                  textAlign: "left", cursor: canSelect ? "pointer" : "not-allowed",
+                                  textAlign: "left", cursor: "pointer",
                                   border: isActive ? "1.5px solid #7c3aed" : "1px solid transparent",
                                   background: isActive ? "#f5f3ff" : "transparent",
-                                  color: !canSelect ? "#aaa" : isActive ? "#7c3aed" : "var(--text)",
-                                  fontWeight: isActive ? 600 : 400, opacity: canSelect ? 1 : 0.6,
+                                  color: isActive ? "#7c3aed" : "var(--text)",
+                                  fontWeight: isActive ? 600 : 400,
                                 }}>
-                                <div>{p.name}{!canSelect && <span style={{ fontSize: ".6rem", color: "#d97706", marginLeft: "6px" }}>bez domény</span>}</div>
-                                {pUrl && <div style={{ fontSize: ".65rem", color: "var(--text-muted)", marginTop: "1px" }}>{pUrl}</div>}
+                                <div>{p.name}</div>
+                                <div style={{ fontSize: ".65rem", color: "var(--text-muted)", marginTop: "1px" }}>{pUrl}</div>
                               </button>
                               <a href={p.previewUrl} target="_blank" rel="noopener noreferrer"
                                 onClick={e => e.stopPropagation()}
@@ -166,21 +165,20 @@ function UrlDropdown({ url, urlMode, pages, folders, openFolders, setOpenFolders
               )}
               {pages.filter(p => !p.folderId).map(p => {
                 const pUrl = p.url;
-                const isActive = pUrl && url === pUrl;
-                const canSelect = !!pUrl;
+                const isActive = url === pUrl;
                 return (
                   <div key={p.id} style={{ display: "flex", alignItems: "center", gap: "4px" }}>
-                    <button onClick={() => { if (canSelect) { onSelectUrl(pUrl); setOpen(false); } }}
+                    <button onClick={() => { onSelectUrl(pUrl); setOpen(false); }}
                       style={{
                         flex: 1, padding: "5px 8px", borderRadius: "6px", fontSize: ".75rem",
-                        textAlign: "left", cursor: canSelect ? "pointer" : "not-allowed",
+                        textAlign: "left", cursor: "pointer",
                         border: isActive ? "1.5px solid #7c3aed" : "1px solid transparent",
                         background: isActive ? "#f5f3ff" : "transparent",
-                        color: !canSelect ? "#aaa" : isActive ? "#7c3aed" : "var(--text)",
-                        fontWeight: isActive ? 600 : 400, opacity: canSelect ? 1 : 0.6,
+                        color: isActive ? "#7c3aed" : "var(--text)",
+                        fontWeight: isActive ? 600 : 400,
                       }}>
-                      <div>{p.name}{!canSelect && <span style={{ fontSize: ".6rem", color: "#d97706", marginLeft: "6px" }}>bez domény</span>}</div>
-                      {pUrl && <div style={{ fontSize: ".65rem", color: "var(--text-muted)", marginTop: "1px" }}>{pUrl}</div>}
+                      <div>{p.name}</div>
+                      <div style={{ fontSize: ".65rem", color: "var(--text-muted)", marginTop: "1px" }}>{pUrl}</div>
                     </button>
                     <a href={p.previewUrl} target="_blank" rel="noopener noreferrer"
                       onClick={e => e.stopPropagation()}
@@ -243,11 +241,16 @@ export default function BulkGenerator({ fbAccount, onNavigate }) {
       setUserPages(pSnap.docs.map(d => {
         const p = { id: d.id, ...d.data() };
         let url = "";
-        if (p.domain) url = `https://${p.domain}${p.slug ? "/" + p.slug : ""}`;
-        // btnUrl jako alternativa pro stránky bez domény
-        if (!url && p.btnUrl) url = p.btnUrl;
-        const previewUrl = p.domain ? url : `/p/${p.id}`;
-        return { id: p.id, name: p.name || "Bez názvu", url, previewUrl, folderId: p.folderId || null, hasDomain: !!p.domain };
+        if (p.domain) {
+          url = `https://${p.domain}${p.slug ? "/" + p.slug : ""}`;
+        } else if (p.btnUrl) {
+          url = p.btnUrl;
+        } else {
+          // Stránky bez domény — použij produkční SellFunl URL
+          url = `https://sellfunl.com/p/${d.id}`;
+        }
+        const previewUrl = p.domain ? url : `/p/${d.id}`;
+        return { id: d.id, name: p.name || "Bez názvu", url, previewUrl, folderId: p.folderId || null };
       }));
       setUserFolders(fSnap.docs.map(d => ({ id: d.id, ...d.data() })));
     }).catch(() => {});

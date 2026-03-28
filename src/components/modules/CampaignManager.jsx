@@ -1972,13 +1972,15 @@ function DuplicateModal({ target, onClose, onDone }) {
       getDocs(query(collection(db, "folders"), where("uid", "==", uid))),
     ]).then(([pagesSnap, foldersSnap]) => {
       const pages = pagesSnap.docs.map(d => ({ id: d.id, ...d.data() })).map(p => {
-        // URL pro Facebook reklamu (veřejný odkaz)
         let url = "";
-        if (p.domain) url = `https://${p.domain}${p.slug ? "/" + p.slug : ""}`;
-        // Náhled stránky (vždy dostupný přes /p/id)
-        const previewUrl = p.domain
-          ? `https://${p.domain}${p.slug ? "/" + p.slug : ""}`
-          : `/p/${p.id}`;
+        if (p.domain) {
+          url = `https://${p.domain}${p.slug ? "/" + p.slug : ""}`;
+        } else if (p.btnUrl) {
+          url = p.btnUrl;
+        } else {
+          url = `https://sellfunl.com/p/${p.id}`;
+        }
+        const previewUrl = p.domain ? url : `/p/${p.id}`;
         return { id: p.id, name: p.name || "Bez názvu", url, previewUrl, folderId: p.folderId || null };
       });
       const folders = foldersSnap.docs.map(d => ({ id: d.id, ...d.data() }));
@@ -2232,22 +2234,20 @@ function DuplicateModal({ target, onClose, onDone }) {
                     }
                   });
                   const PageButton = ({ p }) => {
-                    const selectUrl = p.url; // Jen veřejné URL, ne localhost
-                    const canSelect = !!selectUrl;
-                    const isSelected = canSelect && newUrl === selectUrl;
+                    const selectUrl = p.url;
+                    const isSelected = newUrl === selectUrl;
                     return (
                       <div style={{ display: "flex", alignItems: "center", gap: "4px", width: "100%" }}>
-                        <button onClick={() => canSelect && setNewUrl(selectUrl)} style={{
+                        <button onClick={() => setNewUrl(selectUrl)} style={{
                           flex: 1, padding: "6px 10px", borderRadius: "6px", fontSize: ".78rem",
-                          textAlign: "left", cursor: canSelect ? "pointer" : "not-allowed", transition: "all .15s",
+                          textAlign: "left", cursor: "pointer", transition: "all .15s",
                           border: isSelected ? "2px solid #7c3aed" : "1px solid var(--border)",
                           background: isSelected ? "#f5f3ff" : "transparent",
-                          color: !canSelect ? "#aaa" : isSelected ? "#7c3aed" : "var(--text)",
-                          opacity: canSelect ? 1 : 0.6,
+                          color: isSelected ? "#7c3aed" : "var(--text)",
                         }}>
-                          <div style={{ fontWeight: 600 }}>{p.name}{!canSelect && <span style={{ fontSize: ".6rem", color: "#d97706", marginLeft: "6px" }}>bez domény</span>}</div>
+                          <div style={{ fontWeight: 600 }}>{p.name}</div>
                           <div style={{ fontSize: ".68rem", color: "var(--text-muted)", marginTop: "1px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                            {selectUrl || "Nastavte doménu v nastavení stránky"}
+                            {selectUrl}
                           </div>
                         </button>
                         <a href={p.previewUrl} target="_blank" rel="noopener noreferrer"
