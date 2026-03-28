@@ -1080,3 +1080,302 @@ exports.fbDeleteLeadForm = onCall(
     return { success: true };
   }
 );
+
+// ─── FACEBOOK ADS: duplikuj kampaň / ad set / reklamu s překladem ──────────
+exports.fbDuplicate = onCall(
+  { secrets: [FB_APP_ID, "ANTHROPIC_API_KEY"], timeoutSeconds: 120 },
+  async (request) => {
+    if (!request.auth) throw new HttpsError("unauthenticated", "Musíš být přihlášen.");
+    const {
+      type,           // "campaign" | "adset" | "ad"
+      sourceId,       // ID zdroje
+      adAccountId,
+      targetLanguage, // null = bez překladu, jinak kód jazyka
+      newTargeting,   // null = stejné, jinak nový targeting objekt
+      campaignId,     // potřeba pro adset duplikaci
+      newUrl,         // null = stejný odkaz, jinak nový URL
+    } = request.data;
+
+    if (!type || !sourceId || !adAccountId) {
+      throw new HttpsError("invalid-argument", "Chybí type, sourceId nebo adAccountId.");
+    }
+
+    const { accessToken } = await getFbToken(request.auth.uid);
+
+    // Helper: přelož texty přes Anthropic
+    async function translateTexts(texts, lang) {
+      if (!lang || texts.length === 0) return texts;
+      const nonEmpty = texts.filter(Boolean);
+      if (nonEmpty.length === 0) return texts;
+
+      const prompt = `Přelož následující reklamní texty do jazyka "${lang}". Zachovej formátování, emoji a tón. Vrať POUZE JSON pole řetězců, nic jiného.\n\nTexty:\n${JSON.stringify(nonEmpty)}`;
+
+      const response = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {
+          "x-api-key": process.env.ANTHROPIC_API_KEY,
+          "anthropic-version": "2023-06-01",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          model: "claude-sonnet-4-20250514",
+          max_tokens: 2000,
+          messages: [{ role: "user", content: prompt }],
+        }),
+      });
+      if (!response.ok) return texts;
+      const data = await response.json();
+      try {
+        const raw = data.content?.[0]?.text || "[]";
+        const match = raw.match(/\[[\s\S]*\]/);
+        return match ? JSON.parse(match[0]) : texts;
+      } catch {
+        return texts;
+      }
+    }
+
+    // ─── DUPLIKACE REKLAMY ───
+    async function duplicateAd(adId, adSetId, lang, overrideUrl) {
+      const ad = await fbApi(adId, accessToken, { fields: "name,creative" });
+      const creativeId = ad.creative?.id;
+      if (!creativeId) throw new HttpsError("internal", `Reklama ${adId} nemá kreativu.`);
+      let newName = ad.name + (lang ? ` [${lang}]` : " (kopie)");
+
+      // Bez překladu a bez změny URL — jednoduše použij originální kreativu
+      if (!lang && !overrideUrl) {
+        const newAd = await fbApiPost(`${adAccountId}/ads`, accessToken, {
+          name: newName, adset_id: adSetId, creative: { creative_id: creativeId }, status: "PAUSED",
+        });
+        return { adId: newAd.id };
+      }
+
+      // S překladem nebo změnou URL — načti kreativu a vytvoř novou
+      const creative = await fbApi(creativeId, accessToken, {
+        fields: "name,object_story_spec,asset_feed_spec,url_tags",
+      });
+      console.log(`Creative ${creativeId} keys:`, Object.keys(creative));
+      console.log(`Creative ${creativeId} oss keys:`, creative.object_story_spec ? Object.keys(creative.object_story_spec) : "none");
+
+      let newCreativeBody;
+
+      if (creative.object_story_spec?.link_data) {
+        const oss = creative.object_story_spec;
+        const ld = oss.link_data;
+        const texts = [ld.message || "", ld.name || "", ld.description || ""];
+        const translated = lang ? await translateTexts(texts, lang) : texts;
+
+        const linkUrl = overrideUrl || ld.link;
+        const cleanLinkData = {
+          message: translated[0] || "",
+          name: translated[1] || "",
+          description: translated[2] || "",
+        };
+        if (linkUrl) cleanLinkData.link = linkUrl;
+        if (ld.image_hash) cleanLinkData.image_hash = ld.image_hash;
+        else if (ld.picture) cleanLinkData.picture = ld.picture;
+        if (ld.call_to_action?.type) {
+          cleanLinkData.call_to_action = { type: ld.call_to_action.type };
+          if (linkUrl) cleanLinkData.call_to_action.value = { link: linkUrl };
+        }
+
+        newCreativeBody = {
+          name: `Creative - ${newName}`,
+          object_story_spec: { page_id: oss.page_id, link_data: cleanLinkData },
+        };
+
+      } else if (creative.object_story_spec?.video_data) {
+        const oss = creative.object_story_spec;
+        const vd = oss.video_data;
+        const texts = [vd.message || "", vd.title || ""];
+        const translated = lang ? await translateTexts(texts, lang) : texts;
+
+        const linkUrl = overrideUrl || vd.call_to_action?.value?.link;
+        const cleanVideoData = {
+          message: translated[0] || "",
+          title: translated[1] || "",
+        };
+        if (vd.video_id) cleanVideoData.video_id = vd.video_id;
+        if (vd.image_hash) cleanVideoData.image_hash = vd.image_hash;
+        else if (vd.image_url) cleanVideoData.image_url = vd.image_url;
+        if (vd.call_to_action?.type) {
+          cleanVideoData.call_to_action = { type: vd.call_to_action.type };
+          if (linkUrl) cleanVideoData.call_to_action.value = { link: linkUrl };
+        }
+
+        newCreativeBody = {
+          name: `Creative - ${newName}`,
+          object_story_spec: { page_id: oss.page_id, video_data: cleanVideoData },
+        };
+
+      } else if (creative.asset_feed_spec) {
+        // Dynamic creative — vytvoř ČISTÝ asset_feed_spec od nuly, jen s potřebnými poli
+        const origAfs = creative.asset_feed_spec;
+
+        const bodyTexts = (origAfs.bodies || []).map(b => b.text);
+        const titleTexts = (origAfs.titles || []).map(t => t.text);
+        const descTexts = (origAfs.descriptions || []).map(d => d.text);
+        const [trBodies, trTitles, trDescs] = lang
+          ? await Promise.all([translateTexts(bodyTexts, lang), translateTexts(titleTexts, lang), translateTexts(descTexts, lang)])
+          : [bodyTexts, titleTexts, descTexts];
+
+        // Vybuduj čistý asset_feed_spec — jen povolená pole
+        const cleanAfs = {
+          bodies: trBodies.map(t => ({ text: t })),
+          titles: trTitles.map(t => ({ text: t })),
+          descriptions: trDescs.map(t => ({ text: t })),
+        };
+        // Images: jen hash, nic jiného
+        if (origAfs.images) {
+          cleanAfs.images = origAfs.images.map(img => ({ hash: img.hash || img.image_hash })).filter(i => i.hash);
+        }
+        // Videos: jen video_id + thumbnail
+        if (origAfs.videos) {
+          cleanAfs.videos = origAfs.videos.map(vid => {
+            const v = {};
+            if (vid.video_id) v.video_id = vid.video_id;
+            if (vid.thumbnail_hash) v.thumbnail_hash = vid.thumbnail_hash;
+            return v;
+          }).filter(v => v.video_id);
+        }
+        // Link URLs — přepsat pokud je overrideUrl
+        if (overrideUrl) {
+          cleanAfs.link_urls = [{ website_url: overrideUrl }];
+        } else if (origAfs.link_urls) {
+          cleanAfs.link_urls = origAfs.link_urls.map(lu => {
+            const clean = {};
+            if (lu.website_url) clean.website_url = lu.website_url;
+            if (lu.display_url) clean.display_url = lu.display_url;
+            return clean;
+          });
+        }
+        // CTA typy
+        if (origAfs.call_to_action_types) cleanAfs.call_to_action_types = origAfs.call_to_action_types;
+        // ad_formats: FB vyžaduje když jsou images i videos
+        if (origAfs.ad_formats) cleanAfs.ad_formats = origAfs.ad_formats;
+        // Nic jiného — žádné asset_customization_rules, optimization_type, autotranslate, adlabels
+
+        console.log(`Dynamic creative clean AFS:`, JSON.stringify(cleanAfs).slice(0, 500));
+
+        newCreativeBody = {
+          name: `Creative - ${newName}`,
+          asset_feed_spec: cleanAfs,
+        };
+        if (creative.object_story_spec?.page_id) {
+          newCreativeBody.object_story_spec = { page_id: creative.object_story_spec.page_id };
+        }
+
+      } else {
+        // Neznámý formát — použij originální kreativu bez překladu
+        console.warn(`Reklama ${adId}: neznámý formát kreativy, kopíruji bez překladu.`);
+        const newAd = await fbApiPost(`${adAccountId}/ads`, accessToken, {
+          name: newName, adset_id: adSetId, creative: { creative_id: creativeId }, status: "PAUSED",
+        });
+        return { adId: newAd.id };
+      }
+
+      // Vytvoř novou kreativu s přeloženými texty
+      console.log(`Vytvářím kreativu pro ${newName}, body:`, JSON.stringify(newCreativeBody).slice(0, 800));
+      try {
+        const newCreative = await fbApiPost(`${adAccountId}/adcreatives`, accessToken, newCreativeBody);
+        const newAd = await fbApiPost(`${adAccountId}/ads`, accessToken, {
+          name: newName, adset_id: adSetId, creative: { creative_id: newCreative.id }, status: "PAUSED",
+        });
+        return { adId: newAd.id };
+      } catch (creativeErr) {
+        // Fallback: vytvoř reklamu s originální kreativou, reportuj chybu překladu
+        console.error(`Kreativa selhala (${creativeErr.message}), fallback na originální.`);
+        const newAd = await fbApiPost(`${adAccountId}/ads`, accessToken, {
+          name: newName, adset_id: adSetId, creative: { creative_id: creativeId }, status: "PAUSED",
+        });
+        return { adId: newAd.id, warning: `Překlad selhal: ${creativeErr.message}` };
+      }
+    }
+
+    // ─── DUPLIKACE AD SETU ───
+    async function duplicateAdSet(adSetId, campId, lang, newTargetingOverride, overrideUrl) {
+      const adSet = await fbApi(adSetId, accessToken, {
+        fields: "name,optimization_goal,billing_event,targeting,is_dynamic_creative,daily_budget,lifetime_budget,start_time,end_time,promoted_object",
+      });
+      let newName = adSet.name + (lang ? ` [${lang}]` : " (kopie)");
+
+      // Sloučit targeting: zachovat originál a jen přepsat geo_locations pokud jsou nové
+      let finalTargeting = adSet.targeting || {};
+      if (newTargetingOverride?.geo_locations) {
+        finalTargeting = { ...finalTargeting, geo_locations: newTargetingOverride.geo_locations };
+      }
+
+      const body = {
+        campaign_id: campId, name: newName, status: "PAUSED",
+        optimization_goal: adSet.optimization_goal || "LINK_CLICKS",
+        billing_event: adSet.billing_event || "IMPRESSIONS",
+        targeting: finalTargeting,
+      };
+      if (adSet.daily_budget) body.daily_budget = adSet.daily_budget;
+      if (adSet.lifetime_budget) body.lifetime_budget = adSet.lifetime_budget;
+      if (adSet.promoted_object) body.promoted_object = adSet.promoted_object;
+      if (adSet.start_time) body.start_time = adSet.start_time;
+      if (adSet.end_time) body.end_time = adSet.end_time;
+
+      // Načti reklamy PŘEDEM, abychom mohli zjistit jestli jsou dynamic creative
+      const ads = await fbApi(`${adSetId}/ads`, accessToken, { fields: "id,name,creative{asset_feed_spec}", limit: "50" });
+      const hasDynamicCreative = (ads.data || []).some(a => a.creative?.asset_feed_spec);
+      // Pokud FB API vrátí is_dynamic_creative NEBO některá reklama má asset_feed_spec, nastav true
+      const isDynamic = adSet.is_dynamic_creative === true || adSet.is_dynamic_creative === "true" || hasDynamicCreative;
+      body.is_dynamic_creative = isDynamic;
+      console.log(`Vytvářím adset: is_dynamic_creative=${isDynamic} (orig: ${adSet.is_dynamic_creative}, type: ${typeof adSet.is_dynamic_creative}, hasDynAds: ${hasDynamicCreative})`);
+      const newAdSet = await fbApiPost(`${adAccountId}/adsets`, accessToken, body);
+      console.log(`AdSet ${adSetId}: nalezeno ${(ads.data || []).length} reklam ke kopírování`);
+      const adResults = [];
+      const adErrors = [];
+      for (const ad of (ads.data || [])) {
+        try {
+          console.log(`Kopíruji reklamu ${ad.id} (${ad.name})...`);
+          adResults.push(await duplicateAd(ad.id, newAdSet.id, lang, overrideUrl));
+        } catch (err) {
+          console.error(`CHYBA duplikace reklamy ${ad.id}:`, err.message || err);
+          adErrors.push(`${ad.name || ad.id}: ${err.message}`);
+        }
+      }
+      return { adSetId: newAdSet.id, ads: adResults, adErrors };
+    }
+
+    // ─── DUPLIKACE KAMPANĚ ───
+    async function duplicateCampaign(campId, lang, newTargetingOverride, overrideUrl) {
+      const camp = await fbApi(campId, accessToken, {
+        fields: "name,objective,daily_budget,lifetime_budget,bid_strategy,special_ad_categories",
+      });
+      let newName = camp.name + (lang ? ` [${lang}]` : " (kopie)");
+      const body = {
+        name: newName, objective: camp.objective, status: "PAUSED",
+        special_ad_categories: camp.special_ad_categories || [],
+      };
+      if (camp.bid_strategy) body.bid_strategy = camp.bid_strategy;
+      if (camp.daily_budget) body.daily_budget = camp.daily_budget;
+      if (camp.lifetime_budget) body.lifetime_budget = camp.lifetime_budget;
+
+      const newCamp = await fbApiPost(`${adAccountId}/campaigns`, accessToken, body);
+
+      // Kopírovat všechny ad sety (a jejich reklamy)
+      const adSets = await fbApi(`${campId}/adsets`, accessToken, { fields: "id", limit: "50" });
+      const adSetResults = [];
+      const adSetErrors = [];
+      for (const as of (adSets.data || [])) {
+        try { adSetResults.push(await duplicateAdSet(as.id, newCamp.id, lang, newTargetingOverride, overrideUrl)); }
+        catch (err) { adSetErrors.push(`AdSet ${as.id}: ${err.message}`); }
+      }
+      if (adSetErrors.length > 0) console.warn("Chyby duplikace ad setů:", adSetErrors);
+      return { campaignId: newCamp.id, adSets: adSetResults, adSetErrors };
+    }
+
+    if (type === "campaign") return await duplicateCampaign(sourceId, targetLanguage, newTargeting, newUrl);
+    if (type === "adset") {
+      if (!campaignId) throw new HttpsError("invalid-argument", "Chybí campaignId.");
+      return await duplicateAdSet(sourceId, campaignId, targetLanguage, newTargeting, newUrl);
+    }
+    if (type === "ad") {
+      const adDetail = await fbApi(sourceId, accessToken, { fields: "adset_id" });
+      return await duplicateAd(sourceId, adDetail.adset_id, targetLanguage, newUrl);
+    }
+    throw new HttpsError("invalid-argument", "Neplatný type.");
+  }
+);

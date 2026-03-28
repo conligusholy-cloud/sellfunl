@@ -43,6 +43,41 @@ const CTA_OPTIONS = [
   { value: "GET_QUOTE",    label: "Získat cenovou nabídku" },
 ];
 
+const LANGUAGES = [
+  { value: "",   label: "Bez překladu (kopie v originále)" },
+  { value: "cs", label: "Čeština" },
+  { value: "en", label: "Angličtina" },
+  { value: "de", label: "Němčina" },
+  { value: "sk", label: "Slovenština" },
+  { value: "pl", label: "Polština" },
+  { value: "fr", label: "Francouzština" },
+  { value: "es", label: "Španělština" },
+  { value: "it", label: "Italština" },
+  { value: "pt", label: "Portugalština" },
+  { value: "hu", label: "Maďarština" },
+  { value: "nl", label: "Holandština" },
+  { value: "ro", label: "Rumunština" },
+];
+
+const COUNTRIES = [
+  { value: "CZ", label: "Česko" },
+  { value: "SK", label: "Slovensko" },
+  { value: "DE", label: "Německo" },
+  { value: "AT", label: "Rakousko" },
+  { value: "PL", label: "Polsko" },
+  { value: "HU", label: "Maďarsko" },
+  { value: "GB", label: "Velká Británie" },
+  { value: "US", label: "USA" },
+  { value: "FR", label: "Francie" },
+  { value: "ES", label: "Španělsko" },
+  { value: "IT", label: "Itálie" },
+  { value: "PT", label: "Portugalsko" },
+  { value: "NL", label: "Nizozemsko" },
+  { value: "BE", label: "Belgie" },
+  { value: "CH", label: "Švýcarsko" },
+  { value: "RO", label: "Rumunsko" },
+];
+
 export default function CampaignManager({ fbAccount }) {
   const [adAccountId, setAdAccountId] = useState(() => {
     try { return localStorage.getItem("sellfunl_default_ad_account") || ""; } catch { return ""; }
@@ -52,6 +87,9 @@ export default function CampaignManager({ fbAccount }) {
   const [expandedCampaign, setExpandedCampaign] = useState(null);
   const [showWizard, setShowWizard] = useState(false);
   const [error, setError] = useState(null);
+
+  // ─── Duplikace ────────────────────────────────────────────────────────────
+  const [duplicateTarget, setDuplicateTarget] = useState(null); // { level, id, name, adAccountId }
 
   // Složky
   const [folders, setFolders] = useState([]); // [{ id, name, campaignIds }]
@@ -426,6 +464,15 @@ export default function CampaignManager({ fbAccount }) {
         />
       )}
 
+      {/* Duplikace modal */}
+      {duplicateTarget && (
+        <DuplicateModal
+          target={duplicateTarget}
+          onClose={() => setDuplicateTarget(null)}
+          onDone={() => { setDuplicateTarget(null); loadCampaigns(); }}
+        />
+      )}
+
       {/* Seznam kampaní */}
       {loadingCampaigns ? (
         <div style={{ padding: "40px", textAlign: "center", color: "var(--text-muted)" }}>
@@ -453,6 +500,7 @@ export default function CampaignManager({ fbAccount }) {
                 onStatusChange={updateStatus}
                 onDelete={deleteObject}
                 onMove={folders.length > 0 ? () => setMovingCampaign(c.id) : null}
+                onDuplicate={(level, id, name, campaignId) => setDuplicateTarget({ level, id, name, adAccountId, campaignId })}
               />
             ))}
           </div>
@@ -484,7 +532,7 @@ function EmptyState({ onNew }) {
 }
 
 // ─── Řádek kampaně ───────────────────────────────────────────────────────────
-function CampaignRow({ campaign, expanded, onToggle, onStatusChange, onDelete, onMove }) {
+function CampaignRow({ campaign, expanded, onToggle, onStatusChange, onDelete, onMove, onDuplicate }) {
   const st = STATUS_MAP[campaign.status] || STATUS_MAP.PAUSED;
   const obj = OBJECTIVES.find(o => o.value === campaign.objective);
   const budget = campaign.daily_budget
@@ -529,14 +577,14 @@ function CampaignRow({ campaign, expanded, onToggle, onStatusChange, onDelete, o
 
       {/* Detail */}
       {expanded && (
-        <CampaignDetail campaign={campaign} onStatusChange={onStatusChange} onDelete={onDelete} onMove={onMove} />
+        <CampaignDetail campaign={campaign} onStatusChange={onStatusChange} onDelete={onDelete} onMove={onMove} onDuplicate={onDuplicate} />
       )}
     </div>
   );
 }
 
 // ─── Detail kampaně (ad sety, reklamy) ───────────────────────────────────────
-function CampaignDetail({ campaign, onStatusChange, onDelete, onMove }) {
+function CampaignDetail({ campaign, onStatusChange, onDelete, onMove, onDuplicate }) {
   const [adSets, setAdSets] = useState([]);
   const [loading, setLoading] = useState(true);
   const [expandedAdSet, setExpandedAdSet] = useState(null);
@@ -584,6 +632,9 @@ function CampaignDetail({ campaign, onStatusChange, onDelete, onMove }) {
             📂 Do složky
           </button>
         )}
+        <button onClick={() => onDuplicate("campaign", campaign.id, campaign.name)} style={{ ...btnSmall, color: "#0ea5e9", borderColor: "#0ea5e9" }}>
+          📋 Kopírovat kampaň
+        </button>
         <button onClick={() => {
           if (window.confirm(`Opravdu smazat kampaň "${campaign.name}"? Smaže se i vše pod ní (ad sety, reklamy). Tuto akci nelze vrátit!`)) {
             onDelete(campaign.id);
@@ -612,6 +663,7 @@ function CampaignDetail({ campaign, onStatusChange, onDelete, onMove }) {
               onToggle={() => setExpandedAdSet(expandedAdSet === as.id ? null : as.id)}
               onStatusChange={onStatusChange}
               onDelete={onDelete}
+              onDuplicate={(level, id, name) => onDuplicate(level, id, name, campaign.id)}
             />
           ))}
         </div>
@@ -621,7 +673,7 @@ function CampaignDetail({ campaign, onStatusChange, onDelete, onMove }) {
 }
 
 // ─── Ad Set řádek ────────────────────────────────────────────────────────────
-function AdSetRow({ adSet, expanded, onToggle, onStatusChange, onDelete }) {
+function AdSetRow({ adSet, expanded, onToggle, onStatusChange, onDelete, onDuplicate }) {
   const st = STATUS_MAP[adSet.status] || STATUS_MAP.PAUSED;
   const budget = adSet.daily_budget
     ? `${(adSet.daily_budget / 100).toFixed(0)} Kč/den`
@@ -646,13 +698,13 @@ function AdSetRow({ adSet, expanded, onToggle, onStatusChange, onDelete }) {
         <span style={{ fontSize: ".7rem", color: "var(--text-muted)" }}>{expanded ? "▲" : "▼"}</span>
       </div>
 
-      {expanded && <AdSetDetail adSet={adSet} onStatusChange={onStatusChange} onDelete={onDelete} />}
+      {expanded && <AdSetDetail adSet={adSet} onStatusChange={onStatusChange} onDelete={onDelete} onDuplicate={onDuplicate} />}
     </div>
   );
 }
 
 // ─── Ad Set detail (reklamy) ─────────────────────────────────────────────────
-function AdSetDetail({ adSet, onStatusChange, onDelete }) {
+function AdSetDetail({ adSet, onStatusChange, onDelete, onDuplicate }) {
   const [ads, setAds] = useState([]);
   const [loading, setLoading] = useState(true);
 
@@ -702,6 +754,9 @@ function AdSetDetail({ adSet, onStatusChange, onDelete }) {
             ⏸ Pozastavit
           </button>
         )}
+        <button onClick={() => onDuplicate("adset", adSet.id, adSet.name)} style={{ ...btnSmall, fontSize: ".75rem", color: "#0ea5e9", borderColor: "#0ea5e9" }}>
+          📋 Kopírovat set
+        </button>
         <button onClick={() => {
           if (window.confirm(`Smazat ad set "${adSet.name}"?`)) onDelete(adSet.id);
         }} style={{ ...btnSmall, fontSize: ".75rem", color: "#ef4444", borderColor: "#ef4444", marginLeft: "auto" }}>
@@ -718,14 +773,14 @@ function AdSetDetail({ adSet, onStatusChange, onDelete }) {
       ) : ads.length === 0 ? (
         <p style={{ fontSize: ".78rem", color: "var(--text-muted)", fontStyle: "italic" }}>Žádné reklamy.</p>
       ) : (
-        ads.map(ad => <AdRow key={ad.id} ad={ad} onStatusChange={onStatusChange} onDelete={onDelete} />)
+        ads.map(ad => <AdRow key={ad.id} ad={ad} onStatusChange={onStatusChange} onDelete={onDelete} onDuplicate={onDuplicate} />)
       )}
     </div>
   );
 }
 
 // ─── Řádek reklamy s náhledem ────────────────────────────────────────────────
-function AdRow({ ad, onStatusChange, onDelete }) {
+function AdRow({ ad, onStatusChange, onDelete, onDuplicate }) {
   const ast = STATUS_MAP[ad.status] || STATUS_MAP.PAUSED;
   const [showPreview, setShowPreview] = useState(false);
   const [previewHtml, setPreviewHtml] = useState(null);
@@ -802,6 +857,10 @@ function AdRow({ ad, onStatusChange, onDelete }) {
         {ad.status === "ACTIVE" && (
           <button onClick={() => onStatusChange(ad.id, "PAUSED")} style={{ ...btnSmall, fontSize: ".7rem", padding: "2px 6px", color: "#d97706", borderColor: "#d97706" }} title="Pozastavit">⏸</button>
         )}
+        <button onClick={() => onDuplicate("ad", ad.id, ad.name)}
+          style={{ ...btnSmall, fontSize: ".7rem", padding: "2px 6px", color: "#0ea5e9", borderColor: "#0ea5e9" }} title="Kopírovat">
+          📋
+        </button>
         <button onClick={() => {
           if (!showPreview) loadPreview(previewFormat);
           setShowPreview(!showPreview);
@@ -1885,6 +1944,469 @@ function CampaignWizard({ adAccountId, onClose, onCreated }) {
           </button>
         </div>
       )}
+    </div>
+  );
+}
+
+// ─── Duplikace modal ────────────────────────────────────────────────────────
+function DuplicateModal({ target, onClose, onDone }) {
+  const [translateLang, setTranslateLang] = useState("");
+  const [changeTargeting, setChangeTargeting] = useState(false);
+  const [newCountries, setNewCountries] = useState(["CZ"]);
+  const [changeUrl, setChangeUrl] = useState(false);
+  const [newUrl, setNewUrl] = useState("");
+  const [urlMode, setUrlMode] = useState("page"); // "page" | "manual"
+  const [userPages, setUserPages] = useState([]);
+  const [userFolders, setUserFolders] = useState([]);
+  const [openFolders, setOpenFolders] = useState({});
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState(null);
+  const [progress, setProgress] = useState("");
+
+  // Načti stránky a složky uživatele
+  useEffect(() => {
+    const uid = getAuth()?.currentUser?.uid;
+    if (!uid) return;
+    Promise.all([
+      getDocs(query(collection(db, "pages"), where("uid", "==", uid))),
+      getDocs(query(collection(db, "folders"), where("uid", "==", uid))),
+    ]).then(([pagesSnap, foldersSnap]) => {
+      const pages = pagesSnap.docs.map(d => ({ id: d.id, ...d.data() })).map(p => {
+        // URL pro Facebook reklamu (veřejný odkaz)
+        let url = "";
+        if (p.domain) url = `https://${p.domain}${p.slug ? "/" + p.slug : ""}`;
+        // Náhled stránky (vždy dostupný přes /p/id)
+        const previewUrl = p.domain
+          ? `https://${p.domain}${p.slug ? "/" + p.slug : ""}`
+          : `/p/${p.id}`;
+        return { id: p.id, name: p.name || "Bez názvu", url, previewUrl, folderId: p.folderId || null };
+      });
+      const folders = foldersSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+      setUserPages(pages);
+      setUserFolders(folders);
+    }).catch(err => console.error("Chyba načtení stránek:", err));
+  }, []);
+
+  function toggleFolder(fId) {
+    setOpenFolders(prev => ({ ...prev, [fId]: !prev[fId] }));
+  }
+
+  const levelLabels = { campaign: "kampaň", adset: "ad set", ad: "reklamu" };
+
+  async function handleDuplicate() {
+    setSaving(true);
+    setError(null);
+    setProgress("Vytvářím kopii...");
+    try {
+      const params = {
+        type: target.level,
+        sourceId: target.id,
+        adAccountId: target.adAccountId,
+      };
+      if (target.campaignId) {
+        params.campaignId = target.campaignId;
+      }
+      if (translateLang) {
+        params.targetLanguage = translateLang;
+      }
+      if (changeTargeting && newCountries.length > 0) {
+        params.newTargeting = { geo_locations: { countries: newCountries } };
+      }
+      if (changeUrl && newUrl.trim()) {
+        params.newUrl = newUrl.trim();
+      }
+      if (translateLang) {
+        setProgress("Překládám texty pomocí AI a vytvářím kopii...");
+      }
+      const result = await call("fbDuplicate")(params);
+      const res = result.data || result;
+      // Sbírej chyby a varování z výsledku
+      const allAdErrors = [];
+      const allWarnings = [];
+      if (res.adErrors) allAdErrors.push(...res.adErrors);
+      if (res.adSets) {
+        for (const as of res.adSets) {
+          if (as.adErrors) allAdErrors.push(...as.adErrors);
+          if (as.ads) {
+            for (const ad of as.ads) {
+              if (ad.warning) allWarnings.push(ad.warning);
+            }
+          }
+        }
+      }
+      if (res.adSetErrors) allAdErrors.push(...res.adSetErrors);
+      if (res.warning) allWarnings.push(res.warning);
+
+      if (allAdErrors.length > 0) {
+        setError("Kopie vytvořena, ale některé reklamy se nepodařilo zkopírovat:\n" + allAdErrors.join("\n"));
+        setProgress("");
+      } else if (allWarnings.length > 0) {
+        setError("Kopie vytvořena, ale překlad některých reklam selhal (použity originální texty):\n" + allWarnings.join("\n"));
+        setProgress("");
+      } else {
+        setProgress("Hotovo!");
+        setTimeout(() => onDone(), 600);
+      }
+    } catch (err) {
+      console.error("Duplicate error:", err);
+      setError(err.message || "Chyba při kopírování.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function toggleCountry(code) {
+    setNewCountries(prev =>
+      prev.includes(code) ? prev.filter(c => c !== code) : [...prev, code]
+    );
+  }
+
+  return (
+    <div style={{
+      position: "fixed", inset: 0, background: "rgba(0,0,0,.5)",
+      display: "flex", alignItems: "center", justifyContent: "center",
+      zIndex: 9999,
+    }} onClick={onClose}>
+      <div onClick={e => e.stopPropagation()} style={{
+        background: "var(--bg-card, #fff)", borderRadius: "16px",
+        padding: "28px", width: "100%", maxWidth: "480px",
+        maxHeight: "85vh", overflowY: "auto",
+        boxShadow: "0 20px 60px rgba(0,0,0,.25)",
+      }}>
+        {/* Hlavička */}
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "20px" }}>
+          <h3 style={{ fontSize: "1.05rem", fontWeight: 700, color: "var(--text)", margin: 0 }}>
+            📋 Kopírovat {levelLabels[target.level] || "objekt"}
+          </h3>
+          <button onClick={onClose} style={{
+            border: "none", background: "transparent", fontSize: "1.2rem",
+            cursor: "pointer", color: "var(--text-muted)", padding: "4px",
+          }}>✕</button>
+        </div>
+
+        {/* Název zdroje */}
+        <div style={{
+          padding: "10px 14px", borderRadius: "8px", background: "#f0f9ff",
+          border: "1px solid #bae6fd", marginBottom: "20px", fontSize: ".85rem",
+        }}>
+          <span style={{ color: "#0369a1", fontWeight: 600 }}>Zdroj:</span>{" "}
+          <span style={{ color: "#0c4a6e" }}>{target.name}</span>
+        </div>
+
+        {/* Překlad */}
+        <div style={{ marginBottom: "18px" }}>
+          <label style={{ display: "block", fontSize: ".82rem", fontWeight: 600, color: "var(--text)", marginBottom: "8px" }}>
+            🌍 Překlad textů
+          </label>
+          <select value={translateLang} onChange={e => setTranslateLang(e.target.value)}
+            style={{
+              width: "100%", padding: "10px 12px", borderRadius: "8px",
+              border: "1px solid var(--border)", background: "var(--bg)",
+              color: "var(--text)", fontSize: ".88rem", outline: "none",
+            }}>
+            {LANGUAGES.map(l => (
+              <option key={l.value} value={l.value}>{l.label}</option>
+            ))}
+          </select>
+          {translateLang && (
+            <p style={{ fontSize: ".75rem", color: "#7c3aed", margin: "6px 0 0" }}>
+              Texty reklam budou automaticky přeloženy pomocí AI.
+            </p>
+          )}
+        </div>
+
+        {/* Zacílení */}
+        {target.level !== "ad" && (
+          <div style={{ marginBottom: "18px" }}>
+            <label
+              onClick={() => setChangeTargeting(!changeTargeting)}
+              style={{
+                display: "flex", alignItems: "center", gap: "10px",
+                cursor: "pointer", fontSize: ".82rem", fontWeight: 600,
+                color: "var(--text)", marginBottom: changeTargeting ? "10px" : 0,
+                userSelect: "none",
+              }}
+            >
+              <span style={{
+                display: "inline-flex", alignItems: "center", justifyContent: "center",
+                width: "20px", height: "20px", borderRadius: "4px",
+                border: changeTargeting ? "2px solid #7c3aed" : "2px solid #d1d5db",
+                background: changeTargeting ? "#7c3aed" : "transparent",
+                transition: "all .15s ease",
+              }}>
+                {changeTargeting && <span style={{ color: "#fff", fontSize: "14px", lineHeight: 1 }}>✓</span>}
+              </span>
+              🎯 Změnit zacílení (jiná země)
+            </label>
+
+            {changeTargeting && (
+              <div style={{
+                padding: "12px", borderRadius: "8px", background: "#f8fafc",
+                border: "1px solid var(--border)",
+              }}>
+                <p style={{ fontSize: ".78rem", color: "var(--text-muted)", margin: "0 0 8px" }}>
+                  Vyber země pro novou kopii:
+                </p>
+                <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
+                  {COUNTRIES.map(c => {
+                    const selected = newCountries.includes(c.value);
+                    return (
+                      <button key={c.value} onClick={() => toggleCountry(c.value)}
+                        style={{
+                          padding: "5px 12px", borderRadius: "20px", fontSize: ".78rem",
+                          fontWeight: selected ? 600 : 400,
+                          border: selected ? "2px solid #7c3aed" : "1px solid var(--border)",
+                          background: selected ? "#f5f3ff" : "transparent",
+                          color: selected ? "#7c3aed" : "var(--text)",
+                          cursor: "pointer", transition: "all .15s",
+                        }}>
+                        {c.label}
+                      </button>
+                    );
+                  })}
+                </div>
+                {newCountries.length === 0 && (
+                  <p style={{ fontSize: ".75rem", color: "#ef4444", margin: "8px 0 0" }}>
+                    Vyber alespoň jednu zemi.
+                  </p>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Změna URL */}
+        <div style={{ marginBottom: "18px" }}>
+          <label
+            onClick={() => setChangeUrl(!changeUrl)}
+            style={{
+              display: "flex", alignItems: "center", gap: "10px",
+              cursor: "pointer", fontSize: ".82rem", fontWeight: 600,
+              color: "var(--text)", marginBottom: changeUrl ? "10px" : 0,
+              userSelect: "none",
+            }}
+          >
+            <span style={{
+              display: "inline-flex", alignItems: "center", justifyContent: "center",
+              width: "20px", height: "20px", borderRadius: "4px",
+              border: changeUrl ? "2px solid #7c3aed" : "2px solid #d1d5db",
+              background: changeUrl ? "#7c3aed" : "transparent",
+              transition: "all .15s ease",
+            }}>
+              {changeUrl && <span style={{ color: "#fff", fontSize: "14px", lineHeight: 1 }}>✓</span>}
+            </span>
+            🔗 Změnit odkaz (URL)
+          </label>
+
+          {changeUrl && (
+            <div style={{
+              padding: "12px", borderRadius: "8px", background: "#f8fafc",
+              border: "1px solid var(--border)",
+            }}>
+              {/* Přepínač stránky / ruční */}
+              <div style={{ display: "flex", gap: "6px", marginBottom: "10px" }}>
+                <button onClick={() => { setUrlMode("page"); setNewUrl(""); }} style={{
+                  padding: "5px 14px", borderRadius: "20px", fontSize: ".78rem", fontWeight: urlMode === "page" ? 600 : 400,
+                  border: urlMode === "page" ? "2px solid #7c3aed" : "1px solid var(--border)",
+                  background: urlMode === "page" ? "#f5f3ff" : "transparent",
+                  color: urlMode === "page" ? "#7c3aed" : "var(--text)", cursor: "pointer",
+                }}>Moje stránky</button>
+                <button onClick={() => { setUrlMode("manual"); setNewUrl(""); }} style={{
+                  padding: "5px 14px", borderRadius: "20px", fontSize: ".78rem", fontWeight: urlMode === "manual" ? 600 : 400,
+                  border: urlMode === "manual" ? "2px solid #7c3aed" : "1px solid var(--border)",
+                  background: urlMode === "manual" ? "#f5f3ff" : "transparent",
+                  color: urlMode === "manual" ? "#7c3aed" : "var(--text)", cursor: "pointer",
+                }}>Zadat ručně</button>
+              </div>
+
+              {urlMode === "page" ? (
+                userPages.length > 0 ? (() => {
+                  const pagesInFolders = {};
+                  const pagesNoFolder = [];
+                  userPages.forEach(p => {
+                    if (p.folderId) {
+                      if (!pagesInFolders[p.folderId]) pagesInFolders[p.folderId] = [];
+                      pagesInFolders[p.folderId].push(p);
+                    } else {
+                      pagesNoFolder.push(p);
+                    }
+                  });
+                  const PageButton = ({ p }) => {
+                    const selectUrl = p.url || `https://${window.location.host}/p/${p.id}`;
+                    const isSelected = newUrl === selectUrl;
+                    return (
+                      <div style={{ display: "flex", alignItems: "center", gap: "4px", width: "100%" }}>
+                        <button onClick={() => setNewUrl(selectUrl)} style={{
+                          flex: 1, padding: "6px 10px", borderRadius: "6px", fontSize: ".78rem",
+                          textAlign: "left", cursor: "pointer", transition: "all .15s",
+                          border: isSelected ? "2px solid #7c3aed" : "1px solid var(--border)",
+                          background: isSelected ? "#f5f3ff" : "transparent",
+                          color: isSelected ? "#7c3aed" : "var(--text)",
+                        }}>
+                          <div style={{ fontWeight: 600 }}>{p.name}</div>
+                          <div style={{ fontSize: ".68rem", color: "var(--text-muted)", marginTop: "1px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                            {selectUrl}
+                          </div>
+                        </button>
+                        <a href={p.previewUrl} target="_blank" rel="noopener noreferrer"
+                          title="Náhled stránky" onClick={e => e.stopPropagation()}
+                          style={{
+                            display: "inline-flex", alignItems: "center", justifyContent: "center",
+                            width: "28px", height: "28px", borderRadius: "6px", flexShrink: 0,
+                            background: "#f5f3ff", border: "1px solid #ddd6fe",
+                            color: "#7c3aed", textDecoration: "none", fontSize: ".85rem",
+                            cursor: "pointer",
+                          }}
+                        >👁</a>
+                      </div>
+                    );
+                  };
+                  return (
+                    <div style={{ display: "flex", flexDirection: "column", gap: "4px", maxHeight: "220px", overflowY: "auto" }}>
+                      {/* Složky */}
+                      {userFolders.filter(f => pagesInFolders[f.id]?.length > 0).map(folder => (
+                        <div key={folder.id}>
+                          <button onClick={() => toggleFolder(folder.id)} style={{
+                            width: "100%", padding: "7px 10px", borderRadius: "6px", fontSize: ".8rem",
+                            textAlign: "left", cursor: "pointer", border: "1px solid var(--border)",
+                            background: openFolders[folder.id] ? "#f0f9ff" : "#f8fafc",
+                            color: "var(--text)", fontWeight: 600, display: "flex", alignItems: "center", gap: "6px",
+                          }}>
+                            <span style={{ fontSize: ".7rem", transition: "transform .15s", transform: openFolders[folder.id] ? "rotate(90deg)" : "rotate(0)" }}>▶</span>
+                            <span style={{ color: folder.color || "#7c3aed" }}>📁</span>
+                            {folder.name}
+                            <span style={{ fontSize: ".7rem", color: "var(--text-muted)", marginLeft: "auto" }}>
+                              {pagesInFolders[folder.id].length} stránek
+                            </span>
+                          </button>
+                          {openFolders[folder.id] && (
+                            <div style={{ paddingLeft: "16px", display: "flex", flexDirection: "column", gap: "3px", marginTop: "3px" }}>
+                              {pagesInFolders[folder.id].map(p => <PageButton key={p.id} p={p} />)}
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                      {/* Stránky bez složky */}
+                      {pagesNoFolder.length > 0 && userFolders.length > 0 && (
+                        <div style={{ fontSize: ".72rem", color: "var(--text-muted)", fontWeight: 600, padding: "4px 0 2px", marginTop: "4px" }}>
+                          Bez složky
+                        </div>
+                      )}
+                      {pagesNoFolder.map(p => <PageButton key={p.id} p={p} />)}
+                    </div>
+                  );
+                })() : (
+                  <p style={{ fontSize: ".8rem", color: "var(--text-muted)", margin: 0 }}>
+                    Nemáte žádné vytvořené stránky. Použijte ruční zadání.
+                  </p>
+                )
+              ) : (
+                <input
+                  type="url"
+                  value={newUrl}
+                  onChange={e => setNewUrl(e.target.value)}
+                  placeholder="https://example.com/landing-page"
+                  style={{
+                    width: "100%", padding: "10px 12px", borderRadius: "8px",
+                    border: "1px solid var(--border)", background: "var(--bg)",
+                    color: "var(--text)", fontSize: ".85rem", outline: "none",
+                    boxSizing: "border-box",
+                  }}
+                />
+              )}
+
+              {newUrl && urlMode === "manual" && (
+                <div style={{ display: "flex", alignItems: "center", gap: "8px", margin: "8px 0 0" }}>
+                  {newUrl.startsWith("http") && (
+                    <a href={newUrl} target="_blank" rel="noopener noreferrer"
+                      title="Náhled stránky"
+                      style={{
+                        display: "inline-flex", alignItems: "center", justifyContent: "center",
+                        width: "28px", height: "28px", borderRadius: "6px",
+                        background: "#f5f3ff", border: "1px solid #7c3aed",
+                        color: "#7c3aed", textDecoration: "none", fontSize: "1rem",
+                        cursor: "pointer", flexShrink: 0,
+                      }}
+                    >👁</a>
+                  )}
+                  <span style={{ fontSize: ".75rem", color: "#7c3aed", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {newUrl}
+                  </span>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Chyba */}
+        {error && (
+          <div style={{
+            padding: "10px 14px", borderRadius: "8px", marginBottom: "14px",
+            background: "#fef2f2", border: "1px solid #fecaca", color: "#dc2626", fontSize: ".82rem",
+            whiteSpace: "pre-wrap",
+          }}>
+            {error}
+          </div>
+        )}
+
+        {/* Progress */}
+        {saving && progress && (
+          <div style={{
+            padding: "10px 14px", borderRadius: "8px", marginBottom: "14px",
+            background: "#f0f9ff", border: "1px solid #bae6fd", color: "#0369a1",
+            fontSize: ".82rem", display: "flex", alignItems: "center", gap: "8px",
+          }}>
+            <span style={{ animation: "spin 1s linear infinite", display: "inline-block" }}>⏳</span>
+            {progress}
+          </div>
+        )}
+
+        {/* Shrnutí */}
+        <div style={{
+          padding: "12px 14px", borderRadius: "8px", background: "#f8fafc",
+          border: "1px solid var(--border)", marginBottom: "18px", fontSize: ".82rem",
+          color: "var(--text-muted)",
+        }}>
+          <strong style={{ color: "var(--text)" }}>Shrnutí kopie:</strong>
+          <ul style={{ margin: "6px 0 0", paddingLeft: "18px" }}>
+            <li>Kopíruji: <strong>{levelLabels[target.level]}</strong></li>
+            {translateLang ? (
+              <li>Překlad do: <strong>{LANGUAGES.find(l => l.value === translateLang)?.label}</strong></li>
+            ) : (
+              <li>Bez překladu (originální texty)</li>
+            )}
+            {changeTargeting && newCountries.length > 0 ? (
+              <li>Nové země: <strong>{newCountries.join(", ")}</strong></li>
+            ) : target.level !== "ad" ? (
+              <li>Stejné zacílení jako originál</li>
+            ) : null}
+            {changeUrl && newUrl ? (
+              <li>Nový odkaz: <strong style={{ wordBreak: "break-all" }}>{newUrl}</strong></li>
+            ) : (
+              <li>Stejný odkaz jako originál</li>
+            )}
+          </ul>
+        </div>
+
+        {/* Tlačítka */}
+        <div style={{ display: "flex", gap: "8px", justifyContent: "flex-end" }}>
+          <button onClick={onClose} disabled={saving} style={{
+            padding: "10px 20px", borderRadius: "8px",
+            border: "1px solid var(--border)", background: "var(--bg-card)",
+            color: "var(--text)", cursor: "pointer", fontSize: ".88rem", fontWeight: 500,
+          }}>
+            Zrušit
+          </button>
+          <button onClick={handleDuplicate} disabled={saving || (changeTargeting && newCountries.length === 0)} style={{
+            padding: "10px 20px", borderRadius: "8px", border: "none",
+            background: saving ? "#93c5fd" : "#0ea5e9", color: "#fff",
+            cursor: saving ? "not-allowed" : "pointer",
+            fontWeight: 600, fontSize: ".88rem",
+          }}>
+            {saving ? "⏳ Kopíruji..." : "📋 Vytvořit kopii"}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
