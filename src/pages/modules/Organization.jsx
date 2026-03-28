@@ -46,7 +46,7 @@ export default function Organization() {
   }
 
   return (
-    <div>
+    <div style={{ paddingBottom: "160px" }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "20px", flexWrap: "wrap", gap: "12px" }}>
         <div>
           <h2 style={{ ...h2, marginBottom: "4px" }}>🏢 Organizace</h2>
